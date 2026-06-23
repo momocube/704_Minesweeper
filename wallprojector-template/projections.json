@@ -1,0 +1,25 @@
+{
+  "_comment": "把這份檔案複製到 WallProjector 安裝目錄覆蓋它的 projections.json。rotation 是猜的,現場用管理頁 (http://127.0.0.1:20121) 逐面調正。face index 對照 venue/704.json:0=WallLeft, 1=WallButton, 2=Floor, 3=WallTop, 4=WallRightBig, 5=Entrance(不投), 6=WallRightLittle。",
+  "httpPort": 20121,
+  "touchServiceBaseUrl": "http://127.0.0.1:20111",
+  "autoRestore": true,
+  "restartOnCrash": true,
+  "topmost": true,
+  "browserProfileDir": "profiles",
+  "cdpBasePort": 9333,
+  "screenOverride": null,
+  "contentOverride": null,
+  "fallback": {
+    "screen": { "x": 0, "y": 0, "width": 1920, "height": 1080 },
+    "content": { "offsetX": 0, "offsetY": 0, "scaleX": 1.0, "scaleY": 1.0 },
+    "venueFile": null
+  },
+  "projections": [
+    { "face": 0, "url": "http://localhost:3000/?face=wall-left",         "rotation": 90,  "mode": "wrap", "enabled": true },
+    { "face": 1, "url": "http://localhost:3000/?face=wall-button",       "rotation": 180, "mode": "wrap", "enabled": true },
+    { "face": 2, "url": "http://localhost:3000/?face=floor",             "rotation": 0,   "mode": "wrap", "enabled": true },
+    { "face": 3, "url": "http://localhost:3000/?face=wall-top",          "rotation": 0,   "mode": "wrap", "enabled": true },
+    { "face": 4, "url": "http://localhost:3000/?face=wall-right-big",    "rotation": 270, "mode": "wrap", "enabled": true },
+    { "face": 6, "url": "http://localhost:3000/?face=wall-right-little", "rotation": 270, "mode": "wrap", "enabled": true }
+  ]
+}

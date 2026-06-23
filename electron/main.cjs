@@ -1,0 +1,261 @@
+// Electron main process for 704 Minesweeper.
+// Spawns the Node server as a child (using Electron-as-Node so no external node binary needed),
+// waits for it to listen, then opens controller window. Broadcast button in the controller
+// opens a projector BrowserWindow on the selected display (or windowed for OBS/NDI capture).
+
+const { app, BrowserWindow, ipcMain, screen, Menu } = require('electron');
+const { spawn } = require('node:child_process');
+const path = require('node:path');
+const http = require('node:http');
+
+const SERVER_PORT = Number(process.env.PORT ?? 3000);
+const SERVER_URL = `http://localhost:${SERVER_PORT}`;
+const CONTROLLER_URL = `${SERVER_URL}/?face=all`;
+const PROJECTOR_URL = `${SERVER_URL}/?face=all&projector=1`;
+
+const ROOT = path.join(__dirname, '..');
+const SERVER_SCRIPT = path.join(ROOT, 'server', 'index.js');
+
+let serverProcess = null;
+let controllerWindow = null;
+let projectorWindow = null;
+
+function log(...a) { console.log('[electron]', ...a); }
+
+// ── Server child process ───────────────────────────────────────
+
+function spawnServer() {
+  // Use Electron as Node via ELECTRON_RUN_AS_NODE so we don't need an external node binary
+  // (works when packaged as portable exe).
+  serverProcess = spawn(process.execPath, [SERVER_SCRIPT], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+      PORT: String(SERVER_PORT),
+    },
+  });
+  serverProcess.stdout.on('data', d => process.stdout.write(`[server] ${d}`));
+  serverProcess.stderr.on('data', d => process.stderr.write(`[server] ${d}`));
+  serverProcess.on('exit', (code, signal) => {
+    log(`server exited code=${code} signal=${signal}`);
+    serverProcess = null;
+    if (code !== 0 && code !== null) {
+      // server died unexpectedly → quit the app so user notices
+      if (app.isReady()) app.quit();
+    }
+  });
+}
+
+function waitForServer(timeoutMs = 15000) {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const tryPing = () => {
+      const req = http.get(`${SERVER_URL}/`, (res) => {
+        res.resume();
+        if (res.statusCode === 200) resolve();
+        else retry();
+      });
+      req.on('error', () => retry());
+      req.setTimeout(800, () => { req.destroy(); retry(); });
+    };
+    function retry() {
+      if (Date.now() - start > timeoutMs) return reject(new Error('server start timeout'));
+      setTimeout(tryPing, 200);
+    }
+    tryPing();
+  });
+}
+
+// ── Screen / display detection ─────────────────────────────────
+
+function listDisplayInfos() {
+  const primary = screen.getPrimaryDisplay();
+  return screen.getAllDisplays().map((d, i) => ({
+    id: d.id,
+    label: d.label || `Display ${i + 1}`,
+    bounds: d.bounds,
+    workArea: d.workArea,
+    size: d.size,
+    scaleFactor: d.scaleFactor,
+    isPrimary: d.id === primary.id,
+  }));
+}
+
+function pickSecondaryDisplay() {
+  const primary = screen.getPrimaryDisplay();
+  return screen.getAllDisplays().find(d => d.id !== primary.id) || primary;
+}
+
+function resolveDisplay(displayId) {
+  if (displayId != null) {
+    const match = screen.getAllDisplays().find(d => d.id === displayId);
+    if (match) return match;
+  }
+  return pickSecondaryDisplay();
+}
+
+// ── Windows ────────────────────────────────────────────────────
+
+function createControllerWindow() {
+  controllerWindow = new BrowserWindow({
+    width: 1440,
+    height: 900,
+    backgroundColor: '#0a0a0a',
+    title: '704 Minesweeper — 控制台',
+    autoHideMenuBar: true,
+    show: false,
+    center: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  controllerWindow.loadURL(CONTROLLER_URL);
+  controllerWindow.once('ready-to-show', () => {
+    if (!controllerWindow || controllerWindow.isDestroyed()) return;
+    controllerWindow.show();
+    controllerWindow.focus();
+    controllerWindow.moveTop();
+  });
+  controllerWindow.on('closed', () => {
+    controllerWindow = null;
+  });
+  controllerWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    log(`controller load failed: ${code} ${desc} ${url}`);
+  });
+}
+
+function sendProjectorState() {
+  const isOpen = !!(projectorWindow && !projectorWindow.isDestroyed());
+  if (controllerWindow && !controllerWindow.isDestroyed()) {
+    controllerWindow.webContents.send('projector:state', isOpen);
+  }
+}
+
+function closeProjector() {
+  if (projectorWindow && !projectorWindow.isDestroyed()) {
+    projectorWindow.close();
+  }
+  projectorWindow = null;
+}
+
+function openProjector({ displayId, windowed }) {
+  closeProjector();
+
+  let browserOptions;
+  if (windowed) {
+    const primary = screen.getPrimaryDisplay();
+    const w = 700, h = 1000;
+    browserOptions = {
+      x: primary.bounds.x + Math.max(40, primary.bounds.width - w - 40),
+      y: primary.bounds.y + 40,
+      width: w,
+      height: h,
+      minWidth: 360,
+      minHeight: 480,
+      title: '704 Minesweeper Projector — capture this window',
+      frame: true,
+      autoHideMenuBar: true,
+      backgroundColor: '#000000',
+      resizable: true,
+    };
+  } else {
+    const display = resolveDisplay(displayId);
+    browserOptions = {
+      x: display.bounds.x,
+      y: display.bounds.y,
+      width: display.bounds.width,
+      height: display.bounds.height,
+      fullscreen: true,
+      frame: false,
+      autoHideMenuBar: true,
+      backgroundColor: '#000000',
+    };
+  }
+
+  projectorWindow = new BrowserWindow({
+    ...browserOptions,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  projectorWindow.loadURL(PROJECTOR_URL);
+
+  // ESC to close projector
+  projectorWindow.webContents.on('before-input-event', (e, input) => {
+    if (input.key === 'Escape' && input.type === 'keyDown') {
+      e.preventDefault();
+      closeProjector();
+    }
+  });
+
+  projectorWindow.once('ready-to-show', () => {
+    if (!projectorWindow || projectorWindow.isDestroyed()) return;
+    projectorWindow.show();
+    if (!windowed) projectorWindow.setFullScreen(true);
+  });
+
+  projectorWindow.on('closed', () => {
+    projectorWindow = null;
+    sendProjectorState();
+  });
+
+  sendProjectorState();
+}
+
+// ── IPC handlers ────────────────────────────────────────────────
+
+ipcMain.handle('displays:list', () => listDisplayInfos());
+ipcMain.handle('projector:open',  (_e, opts) => { openProjector(opts ?? {}); return true; });
+ipcMain.handle('projector:close', () => { closeProjector(); return true; });
+ipcMain.handle('projector:isOpen', () => !!(projectorWindow && !projectorWindow.isDestroyed()));
+ipcMain.handle('projector:openSecondary', () => {
+  // shortcut: auto-pick non-primary display, fullscreen
+  openProjector({ displayId: pickSecondaryDisplay().id, windowed: false });
+  return true;
+});
+
+// ── App lifecycle ───────────────────────────────────────────────
+
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (controllerWindow) {
+      if (controllerWindow.isMinimized()) controllerWindow.restore();
+      controllerWindow.focus();
+    }
+  });
+}
+
+app.whenReady().then(async () => {
+  Menu.setApplicationMenu(null);
+  spawnServer();
+  try {
+    await waitForServer();
+    log('server ready, opening controller window');
+  } catch (e) {
+    log('server failed to start:', e.message);
+    app.quit();
+    return;
+  }
+  createControllerWindow();
+});
+
+app.on('window-all-closed', () => {
+  // On macOS apps usually stay open. For our venue use case, quit when controller closes.
+  app.quit();
+});
+
+app.on('before-quit', () => {
+  closeProjector();
+  if (serverProcess && !serverProcess.killed) {
+    serverProcess.kill();
+  }
+});

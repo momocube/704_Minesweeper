@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>704 Minesweeper</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+  const params = new URLSearchParams(location.search);
+  const face = params.get('face') ?? 'all';
+
+  // ?face=all (default) → cyberpunk SVG view (preserves projector=1 etc.)
+  if (face === 'all') {
+    location.replace('/cyberpunk.html' + location.search);
+  } else {
+    // ?face=floor / ?face=wall-XXX → legacy canvas views (used by WallProjector per-face windows)
+    const url = face === 'floor' ? '/floor.js' : '/wall.js';
+    const mod = await import(url);
+    mod.init(face);
+  }
+</script>
+</body>
+</html>

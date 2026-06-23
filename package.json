@@ -1,0 +1,40 @@
+{
+  "name": "704-minesweeper",
+  "version": "0.2.0",
+  "description": "Minesweeper on 704 venue walls — touch from TouchService, projection via WallProjector or built-in Electron projector.",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "server": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test test/*.test.js",
+    "dist": "electron-builder --win portable"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "tw.com.cybercube.704-minesweeper",
+    "productName": "704 Minesweeper",
+    "asar": false,
+    "files": [
+      "electron/**/*",
+      "server/**/*",
+      "views/**/*",
+      "config/**/*",
+      "README.md"
+    ],
+    "win": {
+      "target": ["portable"],
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "artifactName": "704-Minesweeper.exe"
+    }
+  }
+}

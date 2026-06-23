@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>704 Minesweeper · Cyberpunk Visual Redesign</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700;800&family=Orbitron:wght@400;700;900&family=Major+Mono+Display&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-0: #04060A;
+    --bg-1: #070B12;
+    --bg-grid: #0E1924;
+    --text-dim: #2A4258;
+    --text: #8FA8B8;
+    --text-bright: #DFF5FA;
+    --cyan: #00FFE5;
+    --cyan-soft: rgba(0,255,229,0.18);
+    --magenta: #FF2D8F;
+    --magenta-soft: rgba(255,45,143,0.20);
+    --danger: #FF1744;
+    --danger-glow: rgba(255,23,68,0.5);
+    --acid: #39FF14;
+    --acid-soft: rgba(57,255,20,0.18);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: #000; color: var(--text);
+    font-family: 'JetBrains Mono', 'Space Mono', ui-monospace, monospace;
+    overflow: hidden; height: 100vh; width: 100vw;
+  }
+  body { display: flex; align-items: center; justify-content: center; }
+  #root { width: 100vw; height: 100vh; }
+
+  .stage {
+    position: relative; width: 100%; height: 100%;
+    background: var(--bg-0); overflow: hidden;
+  }
+  .stage::before {
+    content: ''; position: absolute; inset: 0;
+    background-image:
+      linear-gradient(to right, var(--bg-grid) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--bg-grid) 1px, transparent 1px);
+    background-size: 64px 64px; opacity: 0.25; pointer-events: none;
+  }
+  .stage.scan::after {
+    content: ''; position: absolute; inset: 0;
+    background: repeating-linear-gradient(to bottom, transparent 0px, transparent 3px,
+      rgba(0, 255, 229, 0.025) 3px, rgba(0, 255, 229, 0.025) 4px);
+    pointer-events: none; mix-blend-mode: screen;
+    animation: scan-drift 8s linear infinite;
+  }
+  @keyframes scan-drift {
+    from { background-position-y: 0; }
+    to { background-position-y: 64px; }
+  }
+  .stage .vignette {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.7) 100%);
+    pointer-events: none;
+  }
+  svg.venue {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(98vw, calc(98vh * 2688 / 3840));
+    height: min(98vh, calc(98vw * 3840 / 2688));
+    overflow: visible;
+  }
+
+  /* projector mode: 滿版填滿、無 cursor、無背景 grid */
+  #root.projector-mode { cursor: none; }
+  #root.projector-mode .stage::before { display: none; }
+  #root.projector-mode svg.venue {
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: none; max-height: none;
+    transform: translate(-50%, -50%);
+  }
+  #root.projector-mode .tweaks-panel { display: none !important; }
+
+  .pulse-slow { animation: pulseSlow 2.4s ease-in-out infinite; }
+  .pulse-fast { animation: pulseFast 0.8s ease-in-out infinite; }
+  .flicker { animation: flicker 6s steps(20, end) infinite; }
+  @keyframes pulseSlow { 0%,100%{opacity:.85} 50%{opacity:.4} }
+  @keyframes pulseFast { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.96)} }
+  @keyframes flicker {
+    0%,9%,11%,100%{opacity:1} 10%{opacity:.7}
+    50%,53%,55%{opacity:1} 51%,54%{opacity:.85}
+  }
+
+  /* ─ Bomb breach (擴散) effects ─ */
+  @keyframes breach-cell {
+    0%   { opacity: 0; }
+    22%  { opacity: 0.92; }   /* 閃光 */
+    55%  { opacity: 0.55; }
+    100% { opacity: 0.18; }   /* 淡紅 tint,讓重啟按鈕清楚透出 */
+  }
+  @keyframes breach-core {
+    0%   { transform: scale(0.1); opacity: 1; }
+    40%  { transform: scale(1.4); opacity: 1; }
+    100% { transform: scale(2.6); opacity: 0; }
+  }
+  @keyframes breach-core-late {
+    0%   { transform: scale(0); opacity: 0; }
+    20%  { transform: scale(0.9); opacity: 1; }
+    100% { transform: scale(1.2); opacity: 0.55; }
+  }
+  @keyframes breach-log-line {
+    0%   { transform: translateX(-12px); opacity: 0; }
+    100% { transform: translateX(0); opacity: 1; }
+  }
+
+  .cell-number { font-family: 'JetBrains Mono', monospace; font-weight: 700; text-anchor: middle; dominant-baseline: central; }
+
+  .tweaks-panel {
+    position: fixed; bottom: 16px; right: 16px;
+    background: rgba(8, 14, 22, 0.92);
+    border: 1px solid rgba(0, 255, 229, 0.35);
+    border-radius: 4px;
+    padding: 14px 16px; min-width: 280px;
+    backdrop-filter: blur(8px); z-index: 1000;
+    font-size: 12px; color: var(--text-bright);
+    box-shadow: 0 0 30px rgba(0,255,229,0.1);
+  }
+  .tweaks-panel h3 {
+    margin: 0 0 12px 0; font-family: 'Orbitron', sans-serif;
+    font-size: 11px; letter-spacing: 0.2em; color: var(--cyan);
+    text-transform: uppercase; display: flex; align-items: center; gap: 8px;
+  }
+  .tweaks-panel h3::before {
+    content: ''; width: 8px; height: 8px;
+    background: var(--cyan); border-radius: 50%;
+    box-shadow: 0 0 8px var(--cyan);
+    animation: pulseFast 1.5s ease-in-out infinite;
+  }
+  .tweak-row { margin-bottom: 10px; display: flex; flex-direction: column; gap: 4px; }
+  .tweak-row label {
+    font-size: 9px; color: var(--text-dim);
+    letter-spacing: 0.15em; text-transform: uppercase;
+  }
+  .tweak-row .seg {
+    display: flex; gap: 2px; background: rgba(0,0,0,0.4);
+    padding: 2px; border: 1px solid rgba(0,255,229,0.15);
+  }
+  .tweak-row .seg button {
+    flex: 1; padding: 5px 8px; background: transparent; border: 0;
+    color: var(--text-dim); font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; cursor: pointer; letter-spacing: 0.05em;
+    transition: all 0.15s;
+  }
+  .tweak-row .seg button:hover { color: var(--text); }
+  .tweak-row .seg button.active {
+    background: rgba(0,255,229,0.15); color: var(--cyan);
+    box-shadow: inset 0 0 0 1px rgba(0,255,229,0.4);
+  }
+  .tweak-foot {
+    margin-top: 10px; padding-top: 8px;
+    border-top: 1px solid rgba(0,255,229,0.15);
+    color: var(--text-dim); font-size: 9px; letter-spacing: 0.1em;
+  }
+
+  /* ─ Broadcast button (only when Electron) ─ */
+  .broadcast-overlay {
+    position: fixed; top: 16px; right: 16px; z-index: 1100;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .broadcast-btn {
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(8,14,22,0.92);
+    border: 1px solid var(--cyan);
+    color: var(--cyan);
+    padding: 9px 18px; font: inherit;
+    font-size: 12px; letter-spacing: 0.25em; font-weight: 500;
+    cursor: pointer; user-select: none;
+    box-shadow: 0 0 14px rgba(0,255,229,0.18);
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .broadcast-btn:hover { background: rgba(0,255,229,0.10); }
+  .broadcast-btn::before {
+    content: ''; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--cyan); box-shadow: 0 0 8px var(--cyan);
+    animation: pulseFast 1.5s ease-in-out infinite;
+  }
+  .broadcast-btn.on {
+    color: var(--magenta); border-color: var(--magenta);
+    box-shadow: 0 0 14px rgba(255,45,143,0.30);
+  }
+  .broadcast-btn.on::before {
+    background: var(--magenta); box-shadow: 0 0 8px var(--magenta);
+  }
+  .broadcast-menu {
+    margin-top: 6px;
+    background: rgba(8,14,22,0.96);
+    border: 1px solid rgba(0,255,229,0.40);
+    min-width: 340px;
+    padding: 4px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+    backdrop-filter: blur(8px);
+  }
+  .broadcast-menu .bmi {
+    display: flex; justify-content: space-between; align-items: center;
+    width: 100%;
+    background: transparent; border: 0;
+    padding: 10px 14px;
+    color: var(--text-bright);
+    font: inherit; font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+    letter-spacing: 0.10em;
+  }
+  .broadcast-menu .bmi:hover { background: rgba(0,255,229,0.10); color: var(--cyan); }
+  .broadcast-menu .bmi .meta {
+    color: var(--text-dim); font-size: 11px; margin-left: 16px;
+  }
+  .broadcast-menu .bmi:hover .meta { color: var(--text); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+// 投播模式偵測 (early): React mount 前先把 class 加到 #root,讓 CSS overrides 立刻生效
+if (new URLSearchParams(location.search).get('projector') === '1') {
+  document.getElementById('root').classList.add('projector-mode');
+}
+const TWEAK_DEFAULTS = {
+  "state": "playing",
+  "palette": "cyan-magenta",
+  "anim": "medium",
+  "scanlines": true,
+  "vignette": true,
+  "cellStyle": "hologram"
+};
+</script>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="/cyber-data.js"></script>
+<script type="text/babel" src="/cyber-cells.js"></script>
+<script type="text/babel" src="/cyber-hud.js"></script>
+<script type="text/babel" src="/cyber-effects.js"></script>
+<script type="text/babel" src="/cyber-app.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "_comment": "5 條跨面接合邊。reverse 反映物理「天-地」方向 — 兩面 game cells 沿邊由物理頂往物理底走,如果展開圖 index 方向相反就 reverse=true。",
+  "edges": [
+    { "a": { "face": "Wall Top",       "edge": "left"   }, "b": { "face": "Wall Left",         "edge": "top"    }, "reverse": false },
+    { "a": { "face": "Wall Top",       "edge": "right"  }, "b": { "face": "Wall Right Big",    "edge": "top"    }, "reverse": true  },
+    { "a": { "face": "Wall Button",    "edge": "left"   }, "b": { "face": "Wall Left",         "edge": "bottom" }, "reverse": true  },
+    { "a": { "face": "Wall Button",    "edge": "right"  }, "b": { "face": "Wall Right little", "edge": "bottom" }, "reverse": false },
+    { "a": { "face": "Wall Right Big", "edge": "bottom" }, "b": { "face": "Wall Right little", "edge": "top"    }, "reverse": false }
+  ]
+}

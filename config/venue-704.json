@@ -1,0 +1,69 @@
+{
+  "venue": "704",
+  "canvas": { "width": 2688, "height": 3840 },
+  "faces": [
+    {
+      "name": "Wall Left",
+      "originX": 0, "originY": 640,
+      "orientation": "vertical", "_cellPxW": 32, "_cellPxH": 16,
+      "colCount": 20, "rowCount": 128,
+      "rawMinX": 1936, "rawMaxX": 2544,
+      "rawMinY": 648, "rawMaxY": 2680,
+      "flipX": false, "flipY": false
+    },
+    {
+      "name": "Wall Button",
+      "originX": 640, "originY": 2688,
+      "orientation": "vertical", "_cellPxW": 32, "_cellPxH": 16,
+      "colCount": 44, "rowCount": 40,
+      "rawMinX": 2576, "rawMaxX": 3952,
+      "rawMinY": 2696, "rawMaxY": 3320,
+      "flipX": false, "flipY": false
+    },
+    {
+      "name": "Floor",
+      "originX": 640, "originY": 640,
+      "orientation": "vertical", "_cellPxW": 32, "_cellPxH": 16,
+      "colCount": 44, "rowCount": 128,
+      "rawMinX": 2576, "rawMaxX": 3952,
+      "rawMinY": 648, "rawMaxY": 2680,
+      "flipX": false, "flipY": false
+    },
+    {
+      "name": "Wall Top",
+      "originX": 640, "originY": 0,
+      "orientation": "vertical", "_cellPxW": 32, "_cellPxH": 16,
+      "colCount": 44, "rowCount": 40,
+      "rawMinX": 2576, "rawMaxX": 3952,
+      "rawMinY": 8, "rawMaxY": 632,
+      "flipX": false, "flipY": false
+    },
+    {
+      "name": "Wall Right Big",
+      "originX": 2048, "originY": 640,
+      "orientation": "vertical", "_cellPxW": 32, "_cellPxH": 16,
+      "colCount": 20, "rowCount": 80,
+      "rawMinX": 3984, "rawMaxX": 4592,
+      "rawMinY": 648, "rawMaxY": 1912,
+      "flipX": false, "flipY": false
+    },
+    {
+      "name": "Entrance",
+      "originX": 2048, "originY": 1920,
+      "orientation": "vertical", "_cellPxW": 32, "_cellPxH": 16,
+      "colCount": 20, "rowCount": 32,
+      "rawMinX": 3984, "rawMaxX": 4592,
+      "rawMinY": 1928, "rawMaxY": 2424,
+      "flipX": false, "flipY": false
+    },
+    {
+      "name": "Wall Right little",
+      "originX": 2048, "originY": 2432,
+      "orientation": "vertical", "_cellPxW": 32, "_cellPxH": 16,
+      "colCount": 20, "rowCount": 16,
+      "rawMinX": 3984, "rawMaxX": 4592,
+      "rawMinY": 2440, "rawMaxY": 2680,
+      "flipX": false, "flipY": false
+    }
+  ]
+}
