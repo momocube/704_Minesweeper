@@ -121,6 +121,9 @@ function createControllerWindow() {
   });
   controllerWindow.on('closed', () => {
     controllerWindow = null;
+    // 控制台關掉 = 整個遊戲關掉,投影窗也一起收
+    // (不然 projector 還活著,window-all-closed 不會 fire,app 留在背景沒 UI)
+    closeProjector();
   });
   controllerWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
     log(`controller load failed: ${code} ${desc} ${url}`);
