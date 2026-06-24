@@ -318,7 +318,8 @@ function App() {
                   mineCount={state.mineCount}
                   flaggedCount={flaggedCount}
                   revealedCount={revealedCount}
-                  totalSafe={totalSafe}/>
+                  totalSafe={totalSafe}
+                  currentMode={state.currentMode}/>
               </>
             )}
           </g>

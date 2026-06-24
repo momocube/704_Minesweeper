@@ -1,6 +1,6 @@
 // ── HUD strips, face labels, terminal command panel ──────
 
-function FaceHUD({ face, palette, mineCount, flaggedCount, revealedCount, totalSafe, state, elapsedMs }) {
+function FaceHUD({ face, palette, mineCount, flaggedCount, revealedCount, totalSafe, state, elapsedMs, currentMode }) {
   const reserved = face.reserved;
   if (!reserved) return null;
 
@@ -33,7 +33,7 @@ function FaceHUD({ face, palette, mineCount, flaggedCount, revealedCount, totalS
         <HUDContent w={w} h={h} face={face} palette={palette}
           mineCount={mineCount} flaggedCount={flaggedCount}
           revealedCount={revealedCount} totalSafe={totalSafe} state={state}
-          elapsedMs={elapsedMs}/>
+          elapsedMs={elapsedMs} currentMode={currentMode}/>
       </g>
     </g>
   );
@@ -67,10 +67,16 @@ function HUDTicks({ rect, reserved, palette }) {
   return <>{ticks}</>;
 }
 
-function HUDContent({ w, h, face, palette, mineCount, flaggedCount, revealedCount, totalSafe, state, elapsedMs }) {
+function HUDContent({ w, h, face, palette, mineCount, flaggedCount, revealedCount, totalSafe, state, elapsedMs, currentMode }) {
   const wide = w > 800;
   const minesLeft = mineCount - flaggedCount;
   const timerStr = state === "idle" ? "00:00" : fmtTime(elapsedMs ?? 0);
+
+  // 模式提示色 + 字 — 只在 playing 顯示;mode 變化時加 mode-flash 動畫
+  const showMode = state === "playing" && (currentMode === 'flag' || currentMode === 'reveal');
+  const modeColor  = currentMode === 'flag' ? palette.secondary : palette.accent;
+  const modeLabel  = currentMode === 'flag' ? 'MARK · FLAG' : 'SCAN · REVEAL';
+  const modeGlyph  = currentMode === 'flag' ? '⚑' : '◎';
 
   if (wide) {
     return (
@@ -98,6 +104,21 @@ function HUDContent({ w, h, face, palette, mineCount, flaggedCount, revealedCoun
             style={{filter: state !== "idle" ? `drop-shadow(0 0 8px ${palette.primary})` : 'none'}}>
             {timerStr}
           </text>
+          {showMode && (
+            // mode 變化時 React 把 key 重設 → 重新觸發 mode-flash 動畫
+            <g key={`mode-${currentMode}`} className="mode-flash"
+               transform={`translate(0, 52)`}>
+              <text x={0} y={0} fontFamily="JetBrains Mono" fontSize={13}
+                fill="rgba(143,168,184,0.6)" textAnchor="middle" letterSpacing="0.3em">
+                MODE
+              </text>
+              <text x={0} y={24} fontFamily="Orbitron" fontWeight={900} fontSize={22}
+                fill={modeColor} textAnchor="middle" letterSpacing="0.18em"
+                style={{filter: `drop-shadow(0 0 6px ${modeColor})`}}>
+                {`${modeGlyph} ${modeLabel}`}
+              </text>
+            </g>
+          )}
         </g>
 
         <g transform={`translate(${w - 40}, ${h/2})`}>
@@ -126,17 +147,26 @@ function HUDContent({ w, h, face, palette, mineCount, flaggedCount, revealedCoun
 
   return (
     <g>
-      <text x={w/2} y={h*0.32} fontFamily="JetBrains Mono" fontSize={14}
+      <text x={w/2} y={h*0.24} fontFamily="JetBrains Mono" fontSize={14}
         fill={palette.primary} textAnchor="middle" letterSpacing="0.2em" fontWeight={500}>
         {`// ${face.id}`}
       </text>
-      <text x={w/2} y={h*0.55} fontFamily="Orbitron" fontWeight={700} fontSize={36}
+      <text x={w/2} y={h*0.46} fontFamily="Orbitron" fontWeight={700} fontSize={36}
         fill={state === "idle" ? "rgba(143,168,184,0.5)" : palette.primary}
         textAnchor="middle" letterSpacing="0.05em"
         style={{filter: state !== "idle" ? `drop-shadow(0 0 6px ${palette.primary})` : 'none'}}>
         {timerStr}
       </text>
-      <text x={w/2} y={h*0.78} fontFamily="JetBrains Mono" fontSize={12}
+      {showMode && (
+        <g key={`mode-${currentMode}`} className="mode-flash">
+          <text x={w/2} y={h*0.66} fontFamily="Orbitron" fontWeight={900} fontSize={16}
+            fill={modeColor} textAnchor="middle" letterSpacing="0.18em"
+            style={{filter: `drop-shadow(0 0 4px ${modeColor})`}}>
+            {`${modeGlyph} ${modeLabel}`}
+          </text>
+        </g>
+      )}
+      <text x={w/2} y={h*0.85} fontFamily="JetBrains Mono" fontSize={12}
         fill="rgba(143,168,184,0.5)" textAnchor="middle" letterSpacing="0.15em">
         {`${revealedCount}/${totalSafe} · T:${String(minesLeft).padStart(2,'0')}`}
       </text>
@@ -182,16 +212,21 @@ function FloorTerminal({ face, palette, state, currentMode }) {
 
   return (
     <g>
+      {/* 整片 Floor 套用 mode 顏色低透明度淡染 — 切換 mode 時整個地板顏色變,讓人從遠處就看到目前模式 */}
+      <rect key={`tint-${currentMode}`} className="mode-tint"
+        x={0} y={0} width={face.w} height={face.h}
+        fill={activeColor} opacity={0.07}/>
+
       <g opacity={0.35}>
         <rect x={20} y={20} width={face.w - 40} height={face.h - 40}
-          fill="none" stroke={palette.primary} strokeWidth={1} strokeDasharray="8 6"/>
+          fill="none" stroke={activeColor} strokeWidth={1.5} strokeDasharray="8 6"/>
         <text x={40} y={50} fontFamily="JetBrains Mono" fontSize={20}
-          fill={palette.primary} letterSpacing="0.2em" opacity={0.7}>
+          fill={activeColor} letterSpacing="0.2em" opacity={0.85}>
           // INPUT.TERMINAL
         </text>
         <text x={face.w - 40} y={50} fontFamily="JetBrains Mono" fontSize={20}
-          fill={palette.primary} letterSpacing="0.2em" opacity={0.7} textAnchor="end">
-          STATE: ACTIVE
+          fill={activeColor} letterSpacing="0.2em" opacity={0.85} textAnchor="end">
+          {`MODE: ${activeLabel}`}
         </text>
       </g>
 
