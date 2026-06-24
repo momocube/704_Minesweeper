@@ -333,6 +333,106 @@
   /* projector mode hides both */
   #root.projector-mode .lock-pill,
   #root.projector-mode .lock-card { display: none !important; }
+
+  /* ─ Game setup card (time limit, idle phase) ─ */
+  .setup-card {
+    position: fixed; bottom: 16px; left: 16px; z-index: 1100;
+    width: 320px;
+    background: rgba(8,14,22,0.94);
+    border: 1px solid rgba(0,255,229,0.40);
+    padding: 14px 16px;
+    color: var(--text-bright);
+    font-family: 'JetBrains Mono', monospace;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.7), 0 0 18px rgba(0,255,229,0.15);
+  }
+  .setup-card h3 {
+    margin: 0 0 12px 0; font-family: 'Orbitron', sans-serif;
+    font-size: 12px; font-weight: 700; letter-spacing: 0.22em;
+    color: var(--cyan); text-shadow: 0 0 6px rgba(0,255,229,0.45);
+  }
+  .setup-check {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 14px; font-size: 13px;
+    letter-spacing: 0.1em; cursor: pointer;
+    color: var(--text-bright);
+  }
+  .setup-check:has(input:disabled) { cursor: not-allowed; opacity: 0.5; }
+  .setup-check input[type=checkbox] {
+    appearance: none; width: 18px; height: 18px;
+    border: 1.5px solid var(--cyan); background: rgba(0,0,0,0.4);
+    position: relative; cursor: inherit;
+  }
+  .setup-check input[type=checkbox]:checked {
+    background: var(--cyan);
+    box-shadow: 0 0 8px var(--cyan);
+  }
+  .setup-check input[type=checkbox]:checked::after {
+    content: '✓'; position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #04060A; font-size: 14px; font-weight: 900;
+  }
+  .setup-row {
+    display: flex; align-items: flex-end; gap: 6px;
+    margin-bottom: 14px;
+  }
+  .setup-row .sep {
+    font-family: 'Orbitron', sans-serif; font-size: 22px;
+    color: var(--cyan); margin: 0 2px; padding-bottom: 10px;
+  }
+  .num-stepper {
+    display: flex; flex-direction: column; align-items: center;
+    flex: 1; gap: 2px;
+  }
+  .num-stepper .num-label {
+    font-size: 9px; color: var(--text-dim);
+    letter-spacing: 0.2em; margin-bottom: 2px;
+  }
+  .num-stepper input[type=number] {
+    width: 100%; height: 36px;
+    background: rgba(0,0,0,0.5);
+    border: 1px solid rgba(0,255,229,0.30);
+    color: var(--text-bright);
+    font-family: 'Orbitron', sans-serif; font-size: 18px; font-weight: 700;
+    text-align: center;
+    -moz-appearance: textfield;
+  }
+  .num-stepper input[type=number]::-webkit-outer-spin-button,
+  .num-stepper input[type=number]::-webkit-inner-spin-button {
+    -webkit-appearance: none; margin: 0;
+  }
+  .num-stepper button {
+    width: 100%; padding: 2px 0;
+    background: rgba(0,255,229,0.10);
+    border: 1px solid rgba(0,255,229,0.30);
+    color: var(--cyan); cursor: pointer;
+    font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700;
+    transition: background 0.15s;
+  }
+  .num-stepper button:hover:not(:disabled) { background: rgba(0,255,229,0.22); }
+  .num-stepper button:disabled, .num-stepper input:disabled {
+    opacity: 0.4; cursor: not-allowed;
+  }
+  .setup-apply {
+    width: 100%; padding: 10px;
+    background: rgba(0,255,229,0.18);
+    border: 1px solid var(--cyan);
+    color: var(--cyan); cursor: pointer;
+    font-family: 'Orbitron', sans-serif; font-size: 12px; font-weight: 700;
+    letter-spacing: 0.22em;
+    transition: background 0.15s;
+  }
+  .setup-apply:hover:not(:disabled) {
+    background: rgba(0,255,229,0.30);
+    box-shadow: 0 0 12px rgba(0,255,229,0.35);
+  }
+  .setup-apply:disabled { opacity: 0.4; cursor: not-allowed; }
+  .setup-note {
+    margin-top: 8px; font-size: 10px;
+    color: var(--text-dim); letter-spacing: 0.1em;
+  }
+
+  #root.projector-mode .setup-card { display: none !important; }
 </style>
 </head>
 <body>

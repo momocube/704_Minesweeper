@@ -64,6 +64,19 @@ function useGameState() {
           setState(msg.snapshot);
         } else if (msg.type === 'mode-change') {
           setState(s => s ? { ...s, currentMode: msg.mode } : s);
+        } else if (msg.type === 'freeze') {
+          // Mine = 5s freeze, game continues. Mark cell + freezeUntil so
+          // FreezeOverlay can render the countdown.
+          setState(s => {
+            if (!s) return s;
+            const cells = s.cells.slice();
+            for (const c of msg.cells || []) cells[c.id] = c;
+            return { ...s, cells, freezeUntil: msg.freezeUntil, bombCellId: msg.bombCellId };
+          });
+        } else if (msg.type === 'unfreeze') {
+          setState(s => s ? { ...s, freezeUntil: null } : s);
+        } else if (msg.type === 'time-limit') {
+          setState(s => s ? { ...s, timeLimit: msg.timeLimit } : s);
         } else if (msg.type === 'cell-update') {
           setState(s => {
             if (!s) return s;
@@ -105,6 +118,147 @@ function useGameState() {
   }, []);
 
   return { state, lockState, send, conn };
+}
+
+// ── Freeze overlay (mine-hit 5s freeze) ─────────────────
+function FreezeOverlay({ state, palette }) {
+  const [, force] = useState(0);
+  useEffect(() => {
+    if (!state?.freezeUntil) return;
+    const t = setInterval(() => force(n => n + 1), 100);
+    return () => clearInterval(t);
+  }, [state?.freezeUntil]);
+  if (!state?.freezeUntil || Date.now() >= state.freezeUntil) return null;
+  const remaining = Math.max(0, state.freezeUntil - Date.now());
+  const seconds = Math.ceil(remaining / 1000);
+  const totalMs = state.freezeDurationMs || 5000;
+  const progress = 1 - remaining / totalMs;
+  return (
+    <g pointerEvents="none">
+      <rect x={0} y={0} width={CANVAS_W} height={CANVAS_H}
+        fill="rgba(50,0,0,0.42)"/>
+      <g transform={`translate(${CANVAS_W/2}, ${CANVAS_H/2})`}>
+        <text x={0} y={-200} textAnchor="middle"
+          fontFamily="Orbitron" fontSize={96} fontWeight={900}
+          fill={palette.danger} letterSpacing="0.30em"
+          style={{filter: `drop-shadow(0 0 22px ${palette.danger})`}}>
+          ⚠ BREACH DETECTED
+        </text>
+        <text x={0} y={140} textAnchor="middle" dominantBaseline="central"
+          fontFamily="Orbitron" fontSize={420} fontWeight={900}
+          fill={palette.danger}
+          style={{filter: `drop-shadow(0 0 36px ${palette.danger})`}}>
+          {seconds}
+        </text>
+        <text x={0} y={320} textAnchor="middle"
+          fontFamily="JetBrains Mono" fontSize={42} fontWeight={500}
+          fill="rgba(255,210,210,0.9)" letterSpacing="0.32em">
+          SYSTEM FROZEN · STAND BY
+        </text>
+        {/* progress bar */}
+        <g transform="translate(-360, 400)">
+          <rect x={0} y={0} width={720} height={12} fill="rgba(255,255,255,0.12)"/>
+          <rect x={0} y={0} width={720 * progress} height={12} fill={palette.danger}
+            style={{filter: `drop-shadow(0 0 8px ${palette.danger})`}}/>
+        </g>
+      </g>
+    </g>
+  );
+}
+
+// ── Game-end overlay (win / timeout) ─────────────────────
+function GameEndOverlay({ state, palette }) {
+  if (!state || state.phase !== 'gameOver') return null;
+  const won = state.won;
+  const reason = state.endReason; // 'win' | 'timeout'
+  const color = won ? palette.accent : palette.danger;
+  const title = won ? '◎ VICTORY' : '⏱ TIME UP';
+  const sub = won ? 'ALL SAFE CELLS REVEALED' : 'TIME LIMIT EXCEEDED';
+  return (
+    <g pointerEvents="none">
+      <g transform={`translate(${CANVAS_W/2}, ${CANVAS_H/2 - 400})`}>
+        <rect x={-540} y={-100} width={1080} height={200}
+          fill="rgba(4,6,12,0.86)" stroke={color} strokeWidth={3}
+          style={{filter: `drop-shadow(0 0 22px ${color})`}}/>
+        <text x={0} y={-12} textAnchor="middle"
+          fontFamily="Orbitron" fontSize={88} fontWeight={900}
+          fill={color} letterSpacing="0.28em"
+          style={{filter: `drop-shadow(0 0 14px ${color})`}}>
+          {title}
+        </text>
+        <text x={0} y={50} textAnchor="middle"
+          fontFamily="JetBrains Mono" fontSize={28} fontWeight={500}
+          fill="rgba(255,255,255,0.7)" letterSpacing="0.25em">
+          {sub}
+        </text>
+      </g>
+    </g>
+  );
+}
+
+// ── Game setup card (time limit; controller only, idle phase) ───
+function GameSetupCard({ state, send, conn }) {
+  const tl = state?.timeLimit ?? { enabled: false, ms: 600_000 };
+  const totalSec = Math.max(0, Math.floor((tl.ms || 0) / 1000));
+  const initH = Math.floor(totalSec / 3600);
+  const initM = Math.floor((totalSec % 3600) / 60);
+  const initS = totalSec % 60;
+
+  const [hours, setHours] = useState(initH);
+  const [minutes, setMinutes] = useState(initM);
+  const [seconds, setSeconds] = useState(initS);
+  const [enabled, setEnabled] = useState(!!tl.enabled);
+
+  // Re-sync when server-side setting updates (e.g., another tab applied)
+  useEffect(() => { setHours(initH); setMinutes(initM); setSeconds(initS); setEnabled(!!tl.enabled); },
+    [tl.enabled, tl.ms]);
+
+  const isIdle = state?.phase === 'idle';
+
+  const apply = useCallback(() => {
+    if (!isIdle) return;
+    const ms = ((hours * 3600) + (minutes * 60) + seconds) * 1000;
+    send({ type: 'set-time-limit', enabled, ms: Math.max(1000, ms) });
+  }, [hours, minutes, seconds, enabled, isIdle, send]);
+
+  return (
+    <div className="setup-card">
+      <h3>// GAME SETUP</h3>
+      <label className="setup-check">
+        <input type="checkbox" checked={enabled} disabled={!isIdle}
+          onChange={e => setEnabled(e.target.checked)}/>
+        <span>啟用上限時間</span>
+      </label>
+      <div className="setup-row">
+        <NumStepper value={hours}   onChange={setHours}   min={0} max={23} label="HH" disabled={!isIdle || !enabled}/>
+        <span className="sep">:</span>
+        <NumStepper value={minutes} onChange={setMinutes} min={0} max={59} label="MM" disabled={!isIdle || !enabled}/>
+        <span className="sep">:</span>
+        <NumStepper value={seconds} onChange={setSeconds} min={0} max={59} label="SS" disabled={!isIdle || !enabled}/>
+      </div>
+      <button className="setup-apply" disabled={!isIdle} onClick={apply}>
+        套用 · APPLY
+      </button>
+      <div className="setup-note">
+        {!isIdle ? '遊戲進行中 — 僅可在 idle 時設定' :
+         (enabled ? `將於 ${String(hours).padStart(2,'0')}:${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')} 觸發 timeout` :
+                    '未啟用 — 遊戲將持續到全部安全格揭露')}
+      </div>
+    </div>
+  );
+}
+
+function NumStepper({ value, onChange, min=0, max=99, label, disabled }) {
+  const clamp = (v) => Math.min(max, Math.max(min, v|0));
+  return (
+    <div className="num-stepper">
+      <div className="num-label">{label}</div>
+      <button disabled={disabled} onClick={() => onChange(clamp(value - 1))}>−</button>
+      <input type="number" value={value} min={min} max={max} disabled={disabled}
+        onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) onChange(clamp(v)); }}/>
+      <button disabled={disabled} onClick={() => onChange(clamp(value + 1))}>+</button>
+    </div>
+  );
 }
 
 // ── live timer tick ─────────────────────────────────────
@@ -344,8 +498,15 @@ function App() {
           );
         })()}
 
-        {(cyberState === 'gameover-wave' || cyberState === 'gameover-final') &&
+        {/* Mine-hit freeze overlay (5s, in-game) — above cells, below pause/end overlays */}
+        <FreezeOverlay state={state} palette={palette}/>
+
+        {/* Game-over redWave (timeout only — win has no wave) */}
+        {(cyberState === 'gameover-wave' || cyberState === 'gameover-final') && state.redWave &&
           <RedWaveOverlay palette={palette} state={state}/>}
+
+        {/* Win / Timeout banner at top */}
+        <GameEndOverlay state={state} palette={palette}/>
 
         {/* Sensor lock calibration overlay — on top of everything inside the SVG */}
         {!PROJECTOR_MODE && <LockOverlay
@@ -358,6 +519,7 @@ function App() {
       {!PROJECTOR_MODE && <LockPill lockState={lockState} onToggle={toggleLockMode}/>}
       {!PROJECTOR_MODE && <LockControlCard lockState={lockState}
         onClear={onClearLocked} onClose={toggleLockMode}/>}
+      {!PROJECTOR_MODE && <GameSetupCard state={state} send={send} conn={conn}/>}
     </div>
   );
 }

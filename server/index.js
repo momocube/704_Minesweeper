@@ -93,6 +93,16 @@ wss.on('connection', (ws) => {
       sensorLock.clear();
       return;
     }
+
+    if (msg.type === 'set-time-limit') {
+      // Only honored when game is idle — server enforces the gate so a
+      // panicked operator clicking the checkbox mid-game doesn't crash
+      // an active timer.
+      if (game.phase === 'idle') {
+        game.setTimeLimit({ enabled: !!msg.enabled, ms: msg.ms });
+      }
+      return;
+    }
   });
   ws.on('close', () => clients.delete(ws));
   ws.on('error', () => clients.delete(ws));

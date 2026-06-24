@@ -4,32 +4,59 @@ import {
   SENSOR_PER_CELL_X, SENSOR_PER_CELL_Y, RESERVED_TOP_ROWS,
 } from './board.js';
 
-// ── Floor button layout (chip coords) ──────────────────────
-// All buttons are 6 chip cols × 12 chip rows = 192×192 venue px.
-// The main row band (rows 58..69) is shared between phases: in playing it
-// hosts MARK + SCAN, in idle/gameOver it hosts a single CENTER button
-// (start / restart), and in paused it hosts RESUME (mark slot) + ABORT
-// (scan slot). PAUSE sits in its own band (rows 104..115) so it never
-// collides with the main row.
-const BTN_ROW_MIN = 58,  BTN_ROW_MAX = 70;     // main row band
-const PAUSE_ROW_MIN = 104, PAUSE_ROW_MAX = 116;
-const CENTER_COL_MIN = 19, CENTER_COL_MAX = 25; // START / RESET / PAUSE share
-const MARK_COL_MIN   = 13, MARK_COL_MAX   = 19; // MARK (playing) / RESUME (paused)
-const SCAN_COL_MIN   = 25, SCAN_COL_MAX   = 31; // SCAN (playing) / ABORT (paused)
+// ── Floor button geometry (venue px) ───────────────────────
+// Donut layout — inner circle = SCAN (reveal) / outer ring = MARK (flag) /
+// pause stays as its own square box below center. Circles are computed
+// against chip-center venue px so a player approaching the floor from
+// any of the four walls hits the ring first (MARK), inner circle if they
+// step right to the middle (SCAN).
+//
+// SCAN_R          inner circle radius (also used for CENTER start/reset
+//                 button and paused RESUME slot)
+// MARK_R          outer ring outer radius (paused ABORT slot uses the
+//                 same ring)
+const FLOOR_CHIP_W = 32;    // chip width  in venue px (Floor orientation)
+const FLOOR_CHIP_H = 16;    // chip height in venue px
+const FLOOR_W      = 1408;  // Floor face width   in venue px
+const FLOOR_H      = 2048;  // Floor face height  in venue px
+const FLOOR_CX     = FLOOR_W / 2;  // 704
+const FLOOR_CY     = FLOOR_H / 2;  // 1024
+const SCAN_R       = 130;   // inner SCAN circle (also CENTER start/reset, paused RESUME)
+const MARK_R       = 320;   // outer MARK ring  (also paused ABORT)
 
-function inBox(col, row, colMin, colMax, rowMin, rowMax) {
-  return col >= colMin && col < colMax && row >= rowMin && row < rowMax;
+// Pause button — separate square box, well clear of the donut
+const PAUSE_COL_MIN = 19, PAUSE_COL_MAX = 25;
+const PAUSE_ROW_MIN = 104, PAUSE_ROW_MAX = 116;
+
+// Mine freeze: how long input is blocked after stepping on a mine.
+const MINE_FREEZE_MS = 5000;
+
+// 3 board cells × 3 board cells — legacy snapshot field for older views.
+const RESTART_BTN_BOARD_CELLS = 3;
+
+function chipCenterPx(sensorCol, sensorRow) {
+  return [sensorCol * FLOOR_CHIP_W + FLOOR_CHIP_W / 2,
+          sensorRow * FLOOR_CHIP_H + FLOOR_CHIP_H / 2];
+}
+
+function distFromFloorCenter(sensorCol, sensorRow) {
+  const [x, y] = chipCenterPx(sensorCol, sensorRow);
+  return Math.hypot(x - FLOOR_CX, y - FLOOR_CY);
+}
+
+function inPauseBox(col, row) {
+  return col >= PAUSE_COL_MIN && col < PAUSE_COL_MAX &&
+         row >= PAUSE_ROW_MIN && row < PAUSE_ROW_MAX;
 }
 
 const FLOOR_BUTTONS = {
-  center: { colMin: CENTER_COL_MIN, colMax: CENTER_COL_MAX, rowMin: BTN_ROW_MIN,   rowMax: BTN_ROW_MAX },
-  mark:   { colMin: MARK_COL_MIN,   colMax: MARK_COL_MAX,   rowMin: BTN_ROW_MIN,   rowMax: BTN_ROW_MAX },
-  scan:   { colMin: SCAN_COL_MIN,   colMax: SCAN_COL_MAX,   rowMin: BTN_ROW_MIN,   rowMax: BTN_ROW_MAX },
-  pause:  { colMin: CENTER_COL_MIN, colMax: CENTER_COL_MAX, rowMin: PAUSE_ROW_MIN, rowMax: PAUSE_ROW_MAX },
+  // inner circle — START / RESET (idle, gameOver), SCAN (playing), RESUME (paused)
+  center: { x: FLOOR_CX, y: FLOOR_CY, r: SCAN_R },
+  // outer ring — MARK (playing), ABORT (paused)
+  outer:  { x: FLOOR_CX, y: FLOOR_CY, rIn: SCAN_R, rOut: MARK_R },
+  // pause — square box, playing only
+  pause:  { colMin: PAUSE_COL_MIN, colMax: PAUSE_COL_MAX, rowMin: PAUSE_ROW_MIN, rowMax: PAUSE_ROW_MAX },
 };
-
-// 3 board cells × 3 board cells for views that still want a single legacy size.
-const RESTART_BTN_BOARD_CELLS = 3;
 
 export class Game {
   constructor(venue, topology, options = {}) {
@@ -37,6 +64,9 @@ export class Game {
     this.topology = topology;
     this.options = options;
     this.listeners = new Set();
+    // Time-limit setting persists across game resets (operator configures once
+    // and re-uses for multiple plays). Default: disabled.
+    this.timeLimit = { enabled: false, ms: 10 * 60 * 1000 };
     this._reset();
   }
 
@@ -50,32 +80,63 @@ export class Game {
     this.mineCount = built.mineCount;
     this.total = built.total;
     this.phase = 'idle';        // 'idle' | 'playing' | 'paused' | 'gameOver'
-    this.gameOver = false;      // mirrors phase === 'gameOver'
+    this.gameOver = false;
     this.won = false;
+    this.endReason = null;      // 'win' | 'timeout' | null
     this.revealedCount = 0;
     this.gameStartMs = null;
     this.gameEndMs = null;
     this.pausedAt = null;
-    this.bombCellId = null;
+    this.bombCellId = null;     // last mine stepped on (for UI highlight)
     this.redWave = null;
-    // Persistent input mode — replaces the old lock-then-confirm flow.
-    // Default to 'reveal' so a freshly started game responds to wall touches
-    // immediately (first-click safety still protects the first reveal).
+    this.freezeUntil = null;    // timestamp; input is blocked when Date.now() < freezeUntil
     this.currentMode = 'reveal';
+    this._timeLimitTimer = null;
+    this._timeLimitRemaining = null;
+    this._freezeTimer = null;
+  }
+
+  _clearTimers() {
+    if (this._timeLimitTimer) { clearTimeout(this._timeLimitTimer); this._timeLimitTimer = null; }
+    if (this._freezeTimer)    { clearTimeout(this._freezeTimer);    this._freezeTimer = null; }
+  }
+
+  setTimeLimit({ enabled, ms }) {
+    const e = !!enabled;
+    const m = Math.max(1, Math.floor(Number(ms) || 0));
+    this.timeLimit = { enabled: e, ms: m };
+    this._emit({ type: 'time-limit', timeLimit: this.timeLimit });
   }
 
   _startGame() {
     this.phase = 'playing';
     this.gameOver = false;
+    this.won = false;
+    this.endReason = null;
     this.gameStartMs = Date.now();
     this.gameEndMs = null;
     this.pausedAt = null;
+    this.freezeUntil = null;
+    this._timeLimitRemaining = null;
+    if (this.timeLimit.enabled) {
+      this._timeLimitTimer = setTimeout(() => this._handleTimeout(), this.timeLimit.ms);
+    }
   }
 
   _pauseGame() {
     if (this.phase !== 'playing') return;
+    // freeze during pause clears (operator chose to pause anyway)
+    if (this._freezeTimer) { clearTimeout(this._freezeTimer); this._freezeTimer = null; }
+    this.freezeUntil = null;
     this.phase = 'paused';
     this.pausedAt = Date.now();
+    // Stash remaining time so resume can re-arm
+    if (this._timeLimitTimer) {
+      const elapsed = this.pausedAt - this.gameStartMs;
+      this._timeLimitRemaining = Math.max(0, this.timeLimit.ms - elapsed);
+      clearTimeout(this._timeLimitTimer);
+      this._timeLimitTimer = null;
+    }
   }
 
   _resumeGame() {
@@ -84,6 +145,10 @@ export class Game {
     this.gameStartMs += pausedDuration;
     this.pausedAt = null;
     this.phase = 'playing';
+    if (this.timeLimit.enabled && this._timeLimitRemaining != null) {
+      this._timeLimitTimer = setTimeout(() => this._handleTimeout(), this._timeLimitRemaining);
+      this._timeLimitRemaining = null;
+    }
   }
 
   snapshot() {
@@ -118,17 +183,19 @@ export class Game {
         };
       }).filter(Boolean),
       cells: this.cells.map(c => this._publicCell(c)),
-      // legacy field kept null for views/wall.js / views/floor.js / views/all.js
-      // which still reference it; new view ignores it
-      lockedCellId: null,
+      lockedCellId: null, // legacy field
       mineCount: this.mineCount,
       flaggedCount: this._countFlagged(),
       revealedCount: this.revealedCount,
       gameOver: this.gameOver,
       won: this.won,
+      endReason: this.endReason,
       gameStartMs: this.gameStartMs,
       gameEndMs: this.gameEndMs,
       pausedAt: this.pausedAt,
+      freezeUntil: this.freezeUntil,
+      freezeDurationMs: MINE_FREEZE_MS,
+      timeLimit: this.timeLimit,
       pauseBtnRows: { min: PAUSE_ROW_MIN, max: PAUSE_ROW_MAX }, // legacy
       bombCellId: this.bombCellId,
       redWave: this.redWave,
@@ -144,7 +211,8 @@ export class Game {
       revealed: c.revealed,
       flagged: c.flagged,
       adjacent: c.revealed ? c.adjacent : null,
-      mine: (this.gameOver && c.mine) ? true : false,
+      // reveal mine identity on revealed mines OR when gameOver
+      mine: ((c.revealed || this.gameOver) && c.mine) ? true : false,
     };
   }
 
@@ -154,34 +222,49 @@ export class Game {
     return n;
   }
 
+  // ── Floor hit-test helpers ─────────────────────────────────
+  _inCenterCircle(col, row) {
+    return col >= 0 && row >= 0 && distFromFloorCenter(col, row) <= SCAN_R;
+  }
+  _inOuterRing(col, row) {
+    if (col < 0 || row < 0) return false;
+    const d = distFromFloorCenter(col, row);
+    return d > SCAN_R && d <= MARK_R;
+  }
+
   handleTouch(faceName, sensorCol, sensorRow) {
     if (faceName === ENTRANCE_FACE_NAME) return;
 
-    // idle: only Floor CENTER → start game
+    // Mine-freeze: block all inputs while frozen
+    if (this.freezeUntil != null && Date.now() < this.freezeUntil) return;
+
+    // idle: inner circle → start
     if (this.phase === 'idle') {
-      if (faceName === FLOOR_FACE_NAME && this._inBtn('center', sensorCol, sensorRow)) {
+      if (faceName === FLOOR_FACE_NAME && this._inCenterCircle(sensorCol, sensorRow)) {
         this._startGame();
         this._emit({ type: 'game-start', snapshot: this.snapshot() });
       }
       return;
     }
 
-    // gameOver: only Floor CENTER → reset to idle (玩家要再按一次開始才開新局)
+    // gameOver: inner circle → reset to idle
     if (this.phase === 'gameOver') {
-      if (faceName === FLOOR_FACE_NAME && this._inBtn('center', sensorCol, sensorRow)) {
+      if (faceName === FLOOR_FACE_NAME && this._inCenterCircle(sensorCol, sensorRow)) {
+        this._clearTimers();
         this._reset();
         this._emit({ type: 'reset', snapshot: this.snapshot() });
       }
       return;
     }
 
-    // paused: MARK slot = resume / SCAN slot = abort
+    // paused: inner → resume / outer ring → abort
     if (this.phase === 'paused') {
       if (faceName !== FLOOR_FACE_NAME) return;
-      if (this._inBtn('mark', sensorCol, sensorRow)) {
+      if (this._inCenterCircle(sensorCol, sensorRow)) {
         this._resumeGame();
         this._emit({ type: 'resume', snapshot: this.snapshot() });
-      } else if (this._inBtn('scan', sensorCol, sensorRow)) {
+      } else if (this._inOuterRing(sensorCol, sensorRow)) {
+        this._clearTimers();
         this._reset();
         this._emit({ type: 'reset', snapshot: this.snapshot() });
       }
@@ -190,41 +273,32 @@ export class Game {
 
     // playing
     if (faceName === FLOOR_FACE_NAME) {
-      // PAUSE sits in its own row band, check first
-      if (this._inBtn('pause', sensorCol, sensorRow)) {
+      if (inPauseBox(sensorCol, sensorRow)) {
         this._pauseGame();
         this._emit({ type: 'pause', snapshot: this.snapshot() });
         return;
       }
-      if (this._inBtn('mark', sensorCol, sensorRow)) {
-        this._setMode('flag');
-        return;
-      }
-      if (this._inBtn('scan', sensorCol, sensorRow)) {
+      if (this._inCenterCircle(sensorCol, sensorRow)) {
         this._setMode('reveal');
         return;
       }
-      // Outside button areas — ignore (floor is otherwise inert during play)
-      return;
+      if (this._inOuterRing(sensorCol, sensorRow)) {
+        this._setMode('flag');
+        return;
+      }
+      return; // inert space
     }
 
     if (BOARD_FACE_NAMES.includes(faceName)) {
       const cellId = sensorToBoardId(faceName, sensorCol, sensorRow, this.faceMap);
-      if (cellId == null) return; // reserved row or out of bounds
+      if (cellId == null) return;
       this._applyModeToCell(cellId);
     }
-  }
-
-  _inBtn(name, col, row) {
-    const b = FLOOR_BUTTONS[name];
-    return inBox(col, row, b.colMin, b.colMax, b.rowMin, b.rowMax);
   }
 
   _setMode(mode) {
     if (this.currentMode === mode) return;
     this.currentMode = mode;
-    // Small delta — view just needs to flip the highlighted button. Avoid
-    // resending the full snapshot for what is a 1-field change.
     this._emit({ type: 'mode-change', mode });
   }
 
@@ -239,7 +313,7 @@ export class Game {
       if (cell.revealed || cell.flagged) return;
       if (this.revealedCount === 0) this._ensureFirstRevealSafe(cell);
       if (cell.mine) {
-        this._handleMineHit(cell);
+        this._handleMineFreeze(cell);
         return;
       }
       const updated = this._floodReveal(cell);
@@ -287,19 +361,54 @@ export class Game {
     return updated;
   }
 
-  _handleMineHit(cell) {
+  // Mine = freeze 5s, no game over. Game continues until win or timeout.
+  _handleMineFreeze(cell) {
+    cell.revealed = true;
+    this.bombCellId = cell.id;
+    this.freezeUntil = Date.now() + MINE_FREEZE_MS;
+    if (this._freezeTimer) clearTimeout(this._freezeTimer);
+    // After freeze: clear `freezeUntil` so the next input gates check passes;
+    // emit so view can dismiss the freeze overlay even though we already know
+    // the timestamp.
+    this._freezeTimer = setTimeout(() => {
+      this._freezeTimer = null;
+      this.freezeUntil = null;
+      this._emit({ type: 'unfreeze' });
+    }, MINE_FREEZE_MS);
+    this._emit({
+      type: 'freeze',
+      freezeUntil: this.freezeUntil,
+      durationMs: MINE_FREEZE_MS,
+      cells: [this._publicCell(cell)],
+      bombCellId: cell.id,
+    });
+  }
+
+  _handleWin() {
+    this._clearTimers();
+    this.phase = 'gameOver';
+    this.gameOver = true;
+    this.won = true;
+    this.endReason = 'win';
+    this.gameEndMs = Date.now();
+    this._emit({ type: 'game-over', won: true, reason: 'win', snapshot: this.snapshot() });
+  }
+
+  _handleTimeout() {
+    if (this.phase !== 'playing') return;
+    this._clearTimers();
     this.phase = 'gameOver';
     this.gameOver = true;
     this.won = false;
+    this.endReason = 'timeout';
     this.gameEndMs = Date.now();
-    cell.revealed = true;
-    this.bombCellId = cell.id;
+    this.freezeUntil = null;
 
+    // Build redWave from floor center outward so the wave radiates from the
+    // ground up — symbolises "time itself" running out, not a specific mine.
     const CELL_PX = 64;
-    const bombFace = this.venue.faces.find(f => f.name === cell.faceName);
-    const bx = bombFace.originX + (cell.col + 0.5) * CELL_PX;
-    const by = bombFace.originY + (cell.row + 0.5) * CELL_PX;
-
+    const bx = this.venue.faces.find(f => f.name === FLOOR_FACE_NAME).originX + FLOOR_CX;
+    const by = this.venue.faces.find(f => f.name === FLOOR_FACE_NAME).originY + FLOOR_CY;
     const wave = [];
     for (const face of this.venue.faces) {
       const facCols = Math.floor(face.colCount / SENSOR_PER_CELL_X);
@@ -321,21 +430,14 @@ export class Game {
     wave.sort((a, b) => a.dist - b.dist);
     this.redWave = wave;
     this._emit({
-      type: 'game-over', won: false,
-      hitCellId: cell.id, redWave: wave,
+      type: 'game-over', won: false, reason: 'timeout',
+      redWave: wave,
       snapshot: this.snapshot(),
     });
   }
 
-  _handleWin() {
-    this.phase = 'gameOver';
-    this.gameOver = true;
-    this.won = true;
-    this.gameEndMs = Date.now();
-    this._emit({ type: 'game-over', won: true, snapshot: this.snapshot() });
-  }
-
   reset() {
+    this._clearTimers();
     this._reset();
     this._emit({ type: 'reset', snapshot: this.snapshot() });
   }
