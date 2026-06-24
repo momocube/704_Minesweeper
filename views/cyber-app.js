@@ -124,6 +124,8 @@ function useGameState() {
 }
 
 // ── Freeze overlay (mine-hit 5s freeze) ─────────────────
+// 純數字倒數,每面牆中央各 render 一個;沒有文字。
+// 每面用 faceContentRotation 旋轉,讓站在那面牆前的玩家數字都是正向。
 function FreezeOverlay({ state, palette }) {
   const [, force] = useState(0);
   useEffect(() => {
@@ -134,33 +136,28 @@ function FreezeOverlay({ state, palette }) {
   if (!state?.freezeUntil || Date.now() >= state.freezeUntil) return null;
   const remaining = Math.max(0, state.freezeUntil - Date.now());
   const seconds = Math.ceil(remaining / 1000);
-  const totalMs = state.freezeDurationMs || 5000;
-  const progress = 1 - remaining / totalMs;
-  // redWave 在底層已經提供紅色戲劇感,wash 留淡淡一層;countdown 是主視覺
+
+  const boardFaces = (state.faces || []).filter(f => f.isBoard);
+
   return (
     <g pointerEvents="none">
-      <g transform={`translate(${CANVAS_W/2}, ${CANVAS_H/2})`}
-         style={{filter: `drop-shadow(0 0 16px ${palette.danger})`}}>
-        <text x={0} y={-180} textAnchor="middle"
-          fontFamily="Orbitron" fontSize={88} fontWeight={900}
-          fill={palette.danger} letterSpacing="0.30em">
-          ⚠ BREACH DETECTED
-        </text>
-        <text x={0} y={120} textAnchor="middle" dominantBaseline="central"
-          fontFamily="Orbitron" fontSize={380} fontWeight={900}
-          fill={palette.danger}>
-          {seconds}
-        </text>
-        <text x={0} y={300} textAnchor="middle"
-          fontFamily="JetBrains Mono" fontSize={38} fontWeight={500}
-          fill="rgba(255,210,210,0.9)" letterSpacing="0.32em">
-          SYSTEM FROZEN · STAND BY
-        </text>
-        <g transform="translate(-340, 370)">
-          <rect x={0} y={0} width={680} height={10} fill="rgba(255,255,255,0.12)"/>
-          <rect x={0} y={0} width={680 * progress} height={10} fill={palette.danger}/>
-        </g>
-      </g>
+      {boardFaces.map(face => {
+        const cx = face.originX + face.width / 2;
+        const cy = face.originY + face.height / 2;
+        const size = Math.min(face.width, face.height) * 0.62;
+        const rot = faceContentRotation(face.reservedSide);
+        return (
+          <g key={face.name}
+             transform={`translate(${cx}, ${cy}) rotate(${rot})`}
+             style={{filter: `drop-shadow(0 0 24px ${palette.danger})`}}>
+            <text x={0} y={0} textAnchor="middle" dominantBaseline="central"
+              fontFamily="Orbitron" fontSize={size} fontWeight={900}
+              fill={palette.danger}>
+              {seconds}
+            </text>
+          </g>
+        );
+      })}
     </g>
   );
 }
