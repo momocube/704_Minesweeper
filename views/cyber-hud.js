@@ -73,12 +73,16 @@ function HUDContent({ w, h, face, palette, mineCount, flaggedCount, revealedCoun
   const timerStr = state === "idle" ? "00:00" : fmtTime(elapsedMs ?? 0);
 
   // 模式提示色 + 字 — 只在 playing 顯示;mode 變化時加 mode-flash 動畫
+  // label 短一點(MARK / SCAN 兩字)讓字級可以拉大、跟 timer 不擠在一起
   const showMode = state === "playing" && (currentMode === 'flag' || currentMode === 'reveal');
-  const modeColor  = currentMode === 'flag' ? palette.secondary : palette.accent;
-  const modeLabel  = currentMode === 'flag' ? 'MARK · FLAG' : 'SCAN · REVEAL';
-  const modeGlyph  = currentMode === 'flag' ? '⚑' : '◎';
+  const modeColor = currentMode === 'flag' ? palette.secondary : palette.accent;
+  const modeLabel = currentMode === 'flag' ? 'MARK' : 'SCAN';
+  const modeGlyph = currentMode === 'flag' ? '⚑' : '◎';
+  const modeSub   = currentMode === 'flag' ? 'TOGGLE FLAG' : 'REVEAL CELL';
 
   if (wide) {
+    // MODE 自己佔一個欄,放在 callsign 跟 timer 之間,跟 SAFE/THREAT 一樣
+    // 是「左對齊 label + 大字數據」的 column 風格,跟計時器不再疊
     return (
       <g>
         <g transform={`translate(40, ${h/2})`}>
@@ -93,6 +97,24 @@ function HUDContent({ w, h, face, palette, mineCount, flaggedCount, revealedCoun
           </text>
         </g>
 
+        {/* MODE column — 跟 callsign / 計時器並排,字級拉大、有自己的 vertical bar */}
+        {showMode && (
+          <g key={`mode-${currentMode}`} className="mode-flash"
+             transform={`translate(${w * 0.28}, ${h/2})`}>
+            <rect x={0} y={-36} width={6} height={72} fill={modeColor}
+              style={{filter: `drop-shadow(0 0 6px ${modeColor})`}}/>
+            <text x={20} y={-14} fontFamily="JetBrains Mono" fontSize={16}
+              fill="rgba(143,168,184,0.7)" letterSpacing="0.3em" fontWeight={500}>
+              MODE
+            </text>
+            <text x={20} y={26} fontFamily="Orbitron" fontWeight={900} fontSize={42}
+              fill={modeColor} letterSpacing="0.18em"
+              style={{filter: `drop-shadow(0 0 10px ${modeColor})`}}>
+              {`${modeGlyph} ${modeLabel}`}
+            </text>
+          </g>
+        )}
+
         <g transform={`translate(${w/2}, ${h/2})`}>
           <text x={0} y={-22} fontFamily="JetBrains Mono" fontSize={14}
             fill="rgba(143,168,184,0.6)" textAnchor="middle" letterSpacing="0.25em">
@@ -104,21 +126,6 @@ function HUDContent({ w, h, face, palette, mineCount, flaggedCount, revealedCoun
             style={{filter: state !== "idle" ? `drop-shadow(0 0 8px ${palette.primary})` : 'none'}}>
             {timerStr}
           </text>
-          {showMode && (
-            // mode 變化時 React 把 key 重設 → 重新觸發 mode-flash 動畫
-            <g key={`mode-${currentMode}`} className="mode-flash"
-               transform={`translate(0, 52)`}>
-              <text x={0} y={0} fontFamily="JetBrains Mono" fontSize={13}
-                fill="rgba(143,168,184,0.6)" textAnchor="middle" letterSpacing="0.3em">
-                MODE
-              </text>
-              <text x={0} y={24} fontFamily="Orbitron" fontWeight={900} fontSize={22}
-                fill={modeColor} textAnchor="middle" letterSpacing="0.18em"
-                style={{filter: `drop-shadow(0 0 6px ${modeColor})`}}>
-                {`${modeGlyph} ${modeLabel}`}
-              </text>
-            </g>
-          )}
         </g>
 
         <g transform={`translate(${w - 40}, ${h/2})`}>
@@ -145,13 +152,14 @@ function HUDContent({ w, h, face, palette, mineCount, flaggedCount, revealedCoun
     );
   }
 
+  // 窄面(主要是 Wall Right Little):垂直堆疊,各自有間距、MODE 字級也拉大
   return (
     <g>
-      <text x={w/2} y={h*0.24} fontFamily="JetBrains Mono" fontSize={14}
+      <text x={w/2} y={h*0.18} fontFamily="JetBrains Mono" fontSize={13}
         fill={palette.primary} textAnchor="middle" letterSpacing="0.2em" fontWeight={500}>
         {`// ${face.id}`}
       </text>
-      <text x={w/2} y={h*0.46} fontFamily="Orbitron" fontWeight={700} fontSize={36}
+      <text x={w/2} y={h*0.42} fontFamily="Orbitron" fontWeight={700} fontSize={32}
         fill={state === "idle" ? "rgba(143,168,184,0.5)" : palette.primary}
         textAnchor="middle" letterSpacing="0.05em"
         style={{filter: state !== "idle" ? `drop-shadow(0 0 6px ${palette.primary})` : 'none'}}>
@@ -159,15 +167,15 @@ function HUDContent({ w, h, face, palette, mineCount, flaggedCount, revealedCoun
       </text>
       {showMode && (
         <g key={`mode-${currentMode}`} className="mode-flash">
-          <text x={w/2} y={h*0.66} fontFamily="Orbitron" fontWeight={900} fontSize={16}
+          <text x={w/2} y={h*0.70} fontFamily="Orbitron" fontWeight={900} fontSize={26}
             fill={modeColor} textAnchor="middle" letterSpacing="0.18em"
-            style={{filter: `drop-shadow(0 0 4px ${modeColor})`}}>
+            style={{filter: `drop-shadow(0 0 6px ${modeColor})`}}>
             {`${modeGlyph} ${modeLabel}`}
           </text>
         </g>
       )}
-      <text x={w/2} y={h*0.85} fontFamily="JetBrains Mono" fontSize={12}
-        fill="rgba(143,168,184,0.5)" textAnchor="middle" letterSpacing="0.15em">
+      <text x={w/2} y={h*0.92} fontFamily="JetBrains Mono" fontSize={11}
+        fill="rgba(143,168,184,0.55)" textAnchor="middle" letterSpacing="0.15em">
         {`${revealedCount}/${totalSafe} · T:${String(minesLeft).padStart(2,'0')}`}
       </text>
     </g>
