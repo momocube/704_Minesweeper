@@ -166,8 +166,8 @@ function HUDContent({ w, h, face, palette, mineCount, flaggedCount, revealedCoun
 // Floor button geometry — 內 SCAN 圓 + 外 MARK 環(donut),四面牆都好踩到
 // PAUSE 還是放在原本 chip rows 104..115 的方塊。
 // 跟 server/game.js 的 SCAN_R / MARK_R / PAUSE box 一致。
-const SCAN_INNER_R   = 130;
-const MARK_OUTER_R   = 320;
+const SCAN_INNER_R   = 210;   // scan 範圍拉大
+const MARK_OUTER_R   = 290;   // mark 環變薄(80 venue px)
 const FLOOR_PAUSE_Y  = 1664;
 const FLOOR_BTN      = 192;
 
@@ -243,93 +243,71 @@ function FloorDonut({ cx, cy, innerR, outerR,
   const innerActive = mode === 'reveal' || mode === 'both';
   const outerActive = mode === 'flag'   || mode === 'both';
 
+  // Perf: 把 drop-shadow filter 限制到必要元素;background fill 不用 filter,
+  // edges 跟 text 還是保留 glow。pulse-slow 只掛在 active 那一邊。
   return (
     <g>
-      {/* ── Outer ring fill (low-opacity wash) ── */}
+      {/* ── Outer ring fill (no filter — opacity 切換已經夠視覺差) ── */}
       <circle cx={cx} cy={cy} r={midR} fill="none"
         stroke={outerColor} strokeWidth={ringW}
-        opacity={outerActive ? 0.20 : 0.08}
+        opacity={outerActive ? 0.22 : 0.07}
         className={outerActive ? 'pulse-slow' : ''}
-        style={{filter: outerActive ? `drop-shadow(0 0 18px ${outerColor})` : 'none',
-                transition: 'opacity 0.5s ease-out'}}/>
+        style={{transition: 'opacity 0.4s ease-out'}}/>
 
-      {/* ── Outer ring edges ── */}
+      {/* ── Outer ring edges (glow on edges,不在 fill) ── */}
       <circle cx={cx} cy={cy} r={outerR} fill="none"
-        stroke={outerColor} strokeWidth={outerActive ? 5 : 3}
-        style={{filter: `drop-shadow(0 0 8px ${outerColor})`,
-                transition: 'stroke-width 0.3s ease-out'}}/>
+        stroke={outerColor} strokeWidth={outerActive ? 4 : 2}
+        style={{filter: `drop-shadow(0 0 6px ${outerColor})`}}/>
       <circle cx={cx} cy={cy} r={innerR} fill="none"
-        stroke={outerColor} strokeWidth={2} strokeDasharray="6 5"
-        opacity={0.6}/>
+        stroke={outerColor} strokeWidth={1.5} strokeDasharray="6 5"
+        opacity={0.55}/>
 
-      {/* ── Inner SCAN fill ── */}
+      {/* ── Inner SCAN fill (no filter) ── */}
       <circle cx={cx} cy={cy} r={innerR}
-        fill={innerColor} fillOpacity={innerActive ? 0.22 : 0.08}
+        fill={innerColor} fillOpacity={innerActive ? 0.20 : 0.07}
         className={innerActive ? 'pulse-slow' : ''}
-        style={{filter: innerActive ? `drop-shadow(0 0 22px ${innerColor})` : 'none',
-                transition: 'fill-opacity 0.5s ease-out'}}/>
+        style={{transition: 'fill-opacity 0.4s ease-out'}}/>
       <circle cx={cx} cy={cy} r={innerR} fill="none"
-        stroke={innerColor} strokeWidth={innerActive ? 5 : 3}
-        style={{filter: `drop-shadow(0 0 8px ${innerColor})`,
-                transition: 'stroke-width 0.3s ease-out'}}/>
+        stroke={innerColor} strokeWidth={innerActive ? 4 : 2.5}
+        style={{filter: `drop-shadow(0 0 6px ${innerColor})`}}/>
 
-      {/* ── 3x3 inner sub-grid (geometric texture) ── */}
-      <g opacity={0.18} stroke={innerColor} strokeWidth={1}>
-        <line x1={cx - innerR * 0.7} y1={cy - innerR / 3} x2={cx + innerR * 0.7} y2={cy - innerR / 3}/>
-        <line x1={cx - innerR * 0.7} y1={cy + innerR / 3} x2={cx + innerR * 0.7} y2={cy + innerR / 3}/>
-        <line x1={cx - innerR / 3} y1={cy - innerR * 0.7} x2={cx - innerR / 3} y2={cy + innerR * 0.7}/>
-        <line x1={cx + innerR / 3} y1={cy - innerR * 0.7} x2={cx + innerR / 3} y2={cy + innerR * 0.7}/>
-      </g>
-
-      {/* ── Inner SCAN glyph + label ── */}
-      <g style={{filter: innerActive ? `drop-shadow(0 0 8px ${innerColor})` : 'none'}}>
-        <text x={cx} y={cy - 14} textAnchor="middle" dominantBaseline="central"
-          fontFamily="Orbitron" fontSize={64} fontWeight={900}
+      {/* ── Inner SCAN glyph + label (single filter on group) ── */}
+      <g style={{filter: `drop-shadow(0 0 6px ${innerColor})`}}>
+        <text x={cx} y={cy - 18} textAnchor="middle" dominantBaseline="central"
+          fontFamily="Orbitron" fontSize={86} fontWeight={900}
           fill={innerColor} opacity={innerActive ? 1 : 0.55}>
           {innerGlyph}
         </text>
-        <text x={cx} y={cy + 42} textAnchor="middle"
-          fontFamily="Orbitron" fontSize={28} fontWeight={700}
+        <text x={cx} y={cy + 54} textAnchor="middle"
+          fontFamily="Orbitron" fontSize={36} fontWeight={700}
           fill={innerColor} opacity={innerActive ? 1 : 0.55}
           letterSpacing="0.20em">
           {innerLabel}
         </text>
         {innerSub && (
-          <text x={cx} y={cy + 72} textAnchor="middle"
-            fontFamily="JetBrains Mono" fontSize={14}
+          <text x={cx} y={cy + 90} textAnchor="middle"
+            fontFamily="JetBrains Mono" fontSize={16}
             fill="rgba(143,168,184,0.7)" letterSpacing="0.18em">
             {innerSub}
           </text>
         )}
       </g>
 
-      {/* ── Outer MARK labels at 4 cardinal positions (站任一面牆都看到) ── */}
+      {/* ── Outer MARK labels at 4 cardinal positions ── */}
       {[
-        { rot: 0,   dx: 0,        dy: -midR },  // top (Wall Top side)
-        { rot: 90,  dx: midR,     dy: 0 },      // right (Wall Right Big side)
-        { rot: 180, dx: 0,        dy: midR },   // bottom (Wall Button side)
-        { rot: 270, dx: -midR,    dy: 0 },      // left (Wall Left side)
+        { rot: 0,   dx: 0,        dy: -midR },
+        { rot: 90,  dx: midR,     dy: 0 },
+        { rot: 180, dx: 0,        dy: midR },
+        { rot: 270, dx: -midR,    dy: 0 },
       ].map((p, i) => (
         <g key={i} transform={`translate(${cx + p.dx}, ${cy + p.dy}) rotate(${p.rot})`}
-           style={{filter: outerActive ? `drop-shadow(0 0 6px ${outerColor})` : `drop-shadow(0 0 3px ${outerColor})`}}>
-          <text x={0} y={-18} textAnchor="middle"
-            fontFamily="Orbitron" fontSize={42} fontWeight={900}
-            fill={outerColor} opacity={outerActive ? 1 : 0.55}>
-            {outerGlyph}
-          </text>
-          <text x={0} y={20} textAnchor="middle"
-            fontFamily="Orbitron" fontSize={26} fontWeight={700}
+           style={{filter: `drop-shadow(0 0 4px ${outerColor})`}}>
+          <text x={0} y={-6} textAnchor="middle" dominantBaseline="central"
+            fontFamily="Orbitron" fontSize={30} fontWeight={900}
             fill={outerColor} opacity={outerActive ? 1 : 0.55}
-            letterSpacing="0.18em">
-            {outerLabel}
+            letterSpacing="0.20em">
+            {outerGlyph} {outerLabel}
           </text>
-          {outerSub && (
-            <text x={0} y={44} textAnchor="middle"
-              fontFamily="JetBrains Mono" fontSize={12}
-              fill="rgba(143,168,184,0.6)" letterSpacing="0.15em">
-              {outerSub}
-            </text>
-          )}
         </g>
       ))}
     </g>

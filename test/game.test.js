@@ -13,11 +13,11 @@ const topology = JSON.parse(await readFile(resolve(ROOT, 'config/board-topology.
 
 // Floor donut geometry (chip coords matching server's distance computation)
 // chip center venue px: (col * 32 + 16, row * 16 + 8); floor center (704, 1024)
-//   SCAN inner r = 130, MARK outer r = 320
+//   SCAN inner r = 210, MARK outer r = 290 (ring width 80)
 //   PAUSE box chip cols 19..24 × rows 104..115
 const CENTER_CHIP = [22, 64];   // (720, 1032), d ≈ 17.9  → inner circle
 const SCAN_CHIP   = [22, 64];   // same as CENTER (idle: start; playing: scan)
-const MARK_CHIP   = [22, 78];   // (720, 1256), d ≈ 232    → outer ring
+const MARK_CHIP   = [22, 79];   // (720, 1272), d ≈ 248    → outer ring (210 < 248 ≤ 290)
 const PAUSE_CHIP  = [22, 110];  // pause box
 
 function newGame(opts = {}) {
@@ -41,9 +41,9 @@ test('初始狀態 = idle, gameStartMs=null, phase=idle, currentMode=reveal', ()
   assert.equal(s.currentMode, 'reveal');
   assert.equal(s.endReason, null);
   // donut geometry exposed
-  assert.equal(s.floorButtons.center.r, 130);
-  assert.equal(s.floorButtons.outer.rIn, 130);
-  assert.equal(s.floorButtons.outer.rOut, 320);
+  assert.equal(s.floorButtons.center.r, 210);
+  assert.equal(s.floorButtons.outer.rIn, 210);
+  assert.equal(s.floorButtons.outer.rOut, 290);
   assert.ok(s.floorButtons.pause);
   // time limit defaults
   assert.equal(s.timeLimit.enabled, false);
@@ -107,16 +107,21 @@ test('Floor 圈外 (donut 範圍以外) 不切 mode', () => {
   assert.equal(g.currentMode, 'reveal');
 });
 
-test('donut 邊界:剛好在 r=130 內 vs 外', () => {
+test('donut 邊界:內圈 r=210 / 外環 r=290', () => {
   const g = newStartedGame();
-  // SCAN inner: chip (22, 60) → (720, 968), d = hypot(16, 56) ≈ 58 → inner
-  g.handleTouch('Floor', ...MARK_CHIP); // 先設 flag
+  // chip (22, 60) → (720, 968), d ≈ 58 → 內圈
+  g.handleTouch('Floor', ...MARK_CHIP);
   assert.equal(g.currentMode, 'flag');
   g.handleTouch('Floor', 22, 60);
-  assert.equal(g.currentMode, 'reveal'); // 內圈 → SCAN
-  // chip (22, 72) → (720, 1160), d = hypot(16, 136) ≈ 137 → 剛好過 inner r=130 → 進 outer
-  g.handleTouch('Floor', 22, 72);
+  assert.equal(g.currentMode, 'reveal');
+  // chip (22, 76) → (720, 1224), d ≈ 200 → 還在 inner(208)…嚴格邊界:
+  // chip (22, 77) → (720, 1240), d ≈ 217 → outer (210 < 217 ≤ 290)
+  g.handleTouch('Floor', 22, 77);
   assert.equal(g.currentMode, 'flag');
+  // chip (22, 87) → (720, 1400), d ≈ 376 → 圈外
+  g.handleTouch('Floor', ...SCAN_CHIP); // back to reveal
+  g.handleTouch('Floor', 22, 87);
+  assert.equal(g.currentMode, 'reveal', '> MARK_R 無 mode 改變');
 });
 
 // ── MINE = FREEZE 5s, not gameOver ──────────────────────────
@@ -127,7 +132,7 @@ function gameWithFirstRevealDone(opts) {
   return g;
 }
 
-test('踩到地雷 → freeze 5s,game 繼續(不 gameOver)', () => {
+test('踩到地雷 → freeze 5s + redWave 從雷格擴散(game 繼續)', () => {
   const g = gameWithFirstRevealDone();
   const mine = g.cells.find(c => c.mine && !c.revealed);
   const events = [];
@@ -137,9 +142,14 @@ test('踩到地雷 → freeze 5s,game 繼續(不 gameOver)', () => {
   assert.equal(g.cells[mine.id].revealed, true, '雷格被揭露');
   assert.ok(g.freezeUntil != null);
   assert.ok(g.freezeUntil > Date.now());
+  assert.ok(Array.isArray(g.redWave), 'redWave 在 freeze 期間被設定');
+  assert.equal(g.redWave.length, 1784);
+  assert.equal(g.redWave[0].dist, 0, '波從雷格 (距離 0) 開始擴散');
+  assert.equal(g.redWave[0].faceName, mine.faceName);
   const freezeEv = events.find(e => e.type === 'freeze');
   assert.ok(freezeEv);
   assert.equal(freezeEv.durationMs, 5000);
+  assert.ok(Array.isArray(freezeEv.redWave));
 });
 
 test('freeze 期間所有觸控被忽略', () => {

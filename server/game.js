@@ -21,8 +21,8 @@ const FLOOR_W      = 1408;  // Floor face width   in venue px
 const FLOOR_H      = 2048;  // Floor face height  in venue px
 const FLOOR_CX     = FLOOR_W / 2;  // 704
 const FLOOR_CY     = FLOOR_H / 2;  // 1024
-const SCAN_R       = 130;   // inner SCAN circle (also CENTER start/reset, paused RESUME)
-const MARK_R       = 320;   // outer MARK ring  (also paused ABORT)
+const SCAN_R       = 210;   // inner SCAN circle (also CENTER start/reset, paused RESUME)
+const MARK_R       = 290;   // outer MARK ring  (also paused ABORT) — ring width 80
 
 // Pause button — separate square box, well clear of the donut
 const PAUSE_COL_MIN = 19, PAUSE_COL_MAX = 25;
@@ -361,18 +361,20 @@ export class Game {
     return updated;
   }
 
-  // Mine = freeze 5s, no game over. Game continues until win or timeout.
+  // Mine = freeze 5s, no game over. Trigger the same breach/redWave visual
+  // as the original mine-hit animation so the consequence reads dramatically;
+  // game continues after freeze clears.
   _handleMineFreeze(cell) {
     cell.revealed = true;
     this.bombCellId = cell.id;
     this.freezeUntil = Date.now() + MINE_FREEZE_MS;
+    this.redWave = this._buildRedWave(cell.faceName, cell.col, cell.row);
     if (this._freezeTimer) clearTimeout(this._freezeTimer);
-    // After freeze: clear `freezeUntil` so the next input gates check passes;
-    // emit so view can dismiss the freeze overlay even though we already know
-    // the timestamp.
     this._freezeTimer = setTimeout(() => {
       this._freezeTimer = null;
       this.freezeUntil = null;
+      this.redWave = null;
+      this.bombCellId = null;
       this._emit({ type: 'unfreeze' });
     }, MINE_FREEZE_MS);
     this._emit({
@@ -381,7 +383,39 @@ export class Game {
       durationMs: MINE_FREEZE_MS,
       cells: [this._publicCell(cell)],
       bombCellId: cell.id,
+      redWave: this.redWave,
     });
+  }
+
+  // Build a redWave centered on a specific cell. Used by both freeze (mine
+  // cell) and timeout (floor center synthetic origin via faceName=Floor +
+  // chip-mid coords).
+  _buildRedWave(originFaceName, originCol, originRow) {
+    const CELL_PX = 64;
+    const originFace = this.venue.faces.find(f => f.name === originFaceName);
+    if (!originFace) return [];
+    const bx = originFace.originX + (originCol + 0.5) * CELL_PX;
+    const by = originFace.originY + (originRow + 0.5) * CELL_PX;
+    const wave = [];
+    for (const face of this.venue.faces) {
+      const facCols = Math.floor(face.colCount / SENSOR_PER_CELL_X);
+      const facRows = Math.floor(face.rowCount / SENSOR_PER_CELL_Y);
+      const fm = this.faceMap.get(face.name);
+      for (let c = 0; c < facCols; c++) {
+        for (let r = 0; r < facRows; r++) {
+          const cx = face.originX + (c + 0.5) * CELL_PX;
+          const cy = face.originY + (r + 0.5) * CELL_PX;
+          wave.push({
+            faceName: face.name,
+            col: c, row: r,
+            dist: Math.hypot(cx - bx, cy - by),
+            cellId: fm?.grid?.[c]?.[r] ?? null,
+          });
+        }
+      }
+    }
+    wave.sort((a, b) => a.dist - b.dist);
+    return wave;
   }
 
   _handleWin() {
@@ -403,35 +437,11 @@ export class Game {
     this.endReason = 'timeout';
     this.gameEndMs = Date.now();
     this.freezeUntil = null;
-
-    // Build redWave from floor center outward so the wave radiates from the
-    // ground up — symbolises "time itself" running out, not a specific mine.
-    const CELL_PX = 64;
-    const bx = this.venue.faces.find(f => f.name === FLOOR_FACE_NAME).originX + FLOOR_CX;
-    const by = this.venue.faces.find(f => f.name === FLOOR_FACE_NAME).originY + FLOOR_CY;
-    const wave = [];
-    for (const face of this.venue.faces) {
-      const facCols = Math.floor(face.colCount / SENSOR_PER_CELL_X);
-      const facRows = Math.floor(face.rowCount / SENSOR_PER_CELL_Y);
-      const fm = this.faceMap.get(face.name);
-      for (let c = 0; c < facCols; c++) {
-        for (let r = 0; r < facRows; r++) {
-          const cx = face.originX + (c + 0.5) * CELL_PX;
-          const cy = face.originY + (r + 0.5) * CELL_PX;
-          wave.push({
-            faceName: face.name,
-            col: c, row: r,
-            dist: Math.hypot(cx - bx, cy - by),
-            cellId: fm?.grid?.[c]?.[r] ?? null,
-          });
-        }
-      }
-    }
-    wave.sort((a, b) => a.dist - b.dist);
-    this.redWave = wave;
+    // Wave radiates from floor center (chip 22,64) → no specific mine.
+    this.redWave = this._buildRedWave(FLOOR_FACE_NAME, 22, 64);
     this._emit({
       type: 'game-over', won: false, reason: 'timeout',
-      redWave: wave,
+      redWave: this.redWave,
       snapshot: this.snapshot(),
     });
   }

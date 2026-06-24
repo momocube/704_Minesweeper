@@ -65,16 +65,19 @@ function useGameState() {
         } else if (msg.type === 'mode-change') {
           setState(s => s ? { ...s, currentMode: msg.mode } : s);
         } else if (msg.type === 'freeze') {
-          // Mine = 5s freeze, game continues. Mark cell + freezeUntil so
-          // FreezeOverlay can render the countdown.
+          // Mine = 5s freeze, game continues. Mark cell + freezeUntil + 紅波
+          // (跟一開始的 breach 動畫一樣) so the consequence is dramatic.
           setState(s => {
             if (!s) return s;
             const cells = s.cells.slice();
             for (const c of msg.cells || []) cells[c.id] = c;
-            return { ...s, cells, freezeUntil: msg.freezeUntil, bombCellId: msg.bombCellId };
+            return { ...s, cells,
+              freezeUntil: msg.freezeUntil,
+              bombCellId: msg.bombCellId,
+              redWave: msg.redWave || null };
           });
         } else if (msg.type === 'unfreeze') {
-          setState(s => s ? { ...s, freezeUntil: null } : s);
+          setState(s => s ? { ...s, freezeUntil: null, redWave: null, bombCellId: null } : s);
         } else if (msg.type === 'time-limit') {
           setState(s => s ? { ...s, timeLimit: msg.timeLimit } : s);
         } else if (msg.type === 'cell-update') {
@@ -133,33 +136,29 @@ function FreezeOverlay({ state, palette }) {
   const seconds = Math.ceil(remaining / 1000);
   const totalMs = state.freezeDurationMs || 5000;
   const progress = 1 - remaining / totalMs;
+  // redWave 在底層已經提供紅色戲劇感,wash 留淡淡一層;countdown 是主視覺
   return (
     <g pointerEvents="none">
-      <rect x={0} y={0} width={CANVAS_W} height={CANVAS_H}
-        fill="rgba(50,0,0,0.42)"/>
-      <g transform={`translate(${CANVAS_W/2}, ${CANVAS_H/2})`}>
-        <text x={0} y={-200} textAnchor="middle"
-          fontFamily="Orbitron" fontSize={96} fontWeight={900}
-          fill={palette.danger} letterSpacing="0.30em"
-          style={{filter: `drop-shadow(0 0 22px ${palette.danger})`}}>
+      <g transform={`translate(${CANVAS_W/2}, ${CANVAS_H/2})`}
+         style={{filter: `drop-shadow(0 0 16px ${palette.danger})`}}>
+        <text x={0} y={-180} textAnchor="middle"
+          fontFamily="Orbitron" fontSize={88} fontWeight={900}
+          fill={palette.danger} letterSpacing="0.30em">
           ⚠ BREACH DETECTED
         </text>
-        <text x={0} y={140} textAnchor="middle" dominantBaseline="central"
-          fontFamily="Orbitron" fontSize={420} fontWeight={900}
-          fill={palette.danger}
-          style={{filter: `drop-shadow(0 0 36px ${palette.danger})`}}>
+        <text x={0} y={120} textAnchor="middle" dominantBaseline="central"
+          fontFamily="Orbitron" fontSize={380} fontWeight={900}
+          fill={palette.danger}>
           {seconds}
         </text>
-        <text x={0} y={320} textAnchor="middle"
-          fontFamily="JetBrains Mono" fontSize={42} fontWeight={500}
+        <text x={0} y={300} textAnchor="middle"
+          fontFamily="JetBrains Mono" fontSize={38} fontWeight={500}
           fill="rgba(255,210,210,0.9)" letterSpacing="0.32em">
           SYSTEM FROZEN · STAND BY
         </text>
-        {/* progress bar */}
-        <g transform="translate(-360, 400)">
-          <rect x={0} y={0} width={720} height={12} fill="rgba(255,255,255,0.12)"/>
-          <rect x={0} y={0} width={720 * progress} height={12} fill={palette.danger}
-            style={{filter: `drop-shadow(0 0 8px ${palette.danger})`}}/>
+        <g transform="translate(-340, 370)">
+          <rect x={0} y={0} width={680} height={10} fill="rgba(255,255,255,0.12)"/>
+          <rect x={0} y={0} width={680 * progress} height={10} fill={palette.danger}/>
         </g>
       </g>
     </g>
@@ -498,12 +497,11 @@ function App() {
           );
         })()}
 
-        {/* Mine-hit freeze overlay (5s, in-game) — above cells, below pause/end overlays */}
-        <FreezeOverlay state={state} palette={palette}/>
+        {/* RedWave: 統一在 state.redWave 設定時 render(mine freeze + timeout 共用同一套動畫) */}
+        {state.redWave && <RedWaveOverlay palette={palette} state={state}/>}
 
-        {/* Game-over redWave (timeout only — win has no wave) */}
-        {(cyberState === 'gameover-wave' || cyberState === 'gameover-final') && state.redWave &&
-          <RedWaveOverlay palette={palette} state={state}/>}
+        {/* Mine-hit freeze overlay (5s countdown) — on top of redWave */}
+        <FreezeOverlay state={state} palette={palette}/>
 
         {/* Win / Timeout banner at top */}
         <GameEndOverlay state={state} palette={palette}/>

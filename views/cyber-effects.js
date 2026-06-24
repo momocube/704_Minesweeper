@@ -9,10 +9,12 @@ function EntranceBackdrop({ face, palette }) {
   const beamGradId = `ent-beam-${id}`;
   const scopeGradId = `ent-scope-${id}`;
 
+  // Perf: 3 columns × 14 lines = 42 text elements + 3 SMIL animations
+  // (vs 5 × 24 = 120 + 5 animations) — 約三分之一的負擔
   const HEX = '0123456789ABCDEF';
-  const COLS = 5;
-  const LINES_PER_COL = 24;
-  const lineH = 22;
+  const COLS = 3;
+  const LINES_PER_COL = 14;
+  const lineH = 26;
   const totalH = LINES_PER_COL * lineH;
 
   const columns = Array.from({ length: COLS }, (_, ci) => ({

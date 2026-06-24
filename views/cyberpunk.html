@@ -126,20 +126,12 @@
     100% { transform: translateX(0); opacity: 1; }
   }
 
-  /* ─ Mode switch flash (HUD + Floor tint) ─
-     React 在 mode 變化時把 key 重設 → DOM 重建 → 動畫重新觸發
-     一次性閃光提示玩家「模式剛切了」,完後回穩定狀態 */
-  .mode-flash { animation: mode-flash 0.8s ease-out 1 both; }
-  @keyframes mode-flash {
-    0%   { opacity: 0;   transform: scale(0.92); filter: brightness(2.5); }
-    25%  { opacity: 1;   transform: scale(1.08); filter: brightness(2.5); }
-    60%  { opacity: 1;   transform: scale(1);    filter: brightness(1.3); }
-    100% { opacity: 1;   transform: scale(1);    filter: brightness(1);   }
-  }
-  .mode-tint  { animation: mode-tint  0.7s ease-out 1 both; }
+  /* ─ Mode switch flash (Floor tint only — HUD 底色由 CSS transition 平滑換色)
+     Floor 整片 1408×2048 rect 一閃就停;不用 brightness filter(超貴) */
+  .mode-tint { animation: mode-tint 0.6s ease-out 1 both; }
   @keyframes mode-tint {
     0%   { opacity: 0; }
-    35%  { opacity: 0.22; }
+    30%  { opacity: 0.22; }
     100% { opacity: 0.07; }
   }
 
