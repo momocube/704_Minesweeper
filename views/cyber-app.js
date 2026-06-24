@@ -11,6 +11,10 @@ const RESTART_DELAY_AFTER_WAVE_MS = 400;
 // 投播模式:控制台跟投影視窗用同一個 view,投播時隱藏 UI / disable click / 隱藏 cursor
 const PROJECTOR_MODE = new URLSearchParams(location.search).get('projector') === '1';
 
+// 跨 BrowserWindow 同步 tweaks(palette / cellStyle / scanlines / vignette)
+// 控制台改 → 投播即時跟著變(同 origin,Electron BroadcastChannel 跨 BrowserWindow 可用)
+const twChannel = (typeof BroadcastChannel !== 'undefined') ? new BroadcastChannel('cyber-tw') : null;
+
 // 每面 cell 內容旋轉(站在房間看時數字正向)
 function faceContentRotation(reserved) {
   switch (reserved) {
@@ -131,8 +135,33 @@ function App() {
     setTw(p => {
       const next = { ...p, [key]: value };
       localStorage.setItem('cyber-tw', JSON.stringify(next));
+      // 同步通知其他 window(投播視窗)— BroadcastChannel 比 storage event 可靠
+      // (storage event 在某些 Electron 版本不會跨 BrowserWindow 觸發)
+      try { twChannel?.postMessage(next); } catch {}
       return next;
     });
+  }, []);
+
+  // 接收其他 window 的 tweaks 變更(控制台改 palette → 投播即時跟著變)
+  useEffect(() => {
+    if (!twChannel) return;
+    const onMsg = (e) => {
+      if (e.data && typeof e.data === 'object') {
+        setTw({ ...TWEAK_DEFAULTS, ...e.data });
+      }
+    };
+    twChannel.addEventListener('message', onMsg);
+    // storage event 作為 fallback(同 origin 同分區的另一個 BrowserWindow 有時會收到)
+    const onStorage = (e) => {
+      if (e.key === 'cyber-tw' && e.newValue) {
+        try { setTw({ ...TWEAK_DEFAULTS, ...JSON.parse(e.newValue) }); } catch {}
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => {
+      twChannel.removeEventListener('message', onMsg);
+      window.removeEventListener('storage', onStorage);
+    };
   }, []);
 
   const palette = PALETTES[tw.palette] || PALETTES["cyan-magenta"];
@@ -271,6 +300,25 @@ function App() {
             )}
           </g>
         ))}
+
+        {cyberState === 'paused' && (() => {
+          const floor = faces.find(f => f.isFloor);
+          return (
+            <g pointerEvents="none">
+              {/* 全場 mask:半透明深色蓋住所有牆面/cells/HUD */}
+              <rect x={0} y={0} width={CANVAS_W} height={CANVAS_H}
+                fill="rgba(2,4,10,0.62)"/>
+              {/* Floor 上方加一層深色背板,讓 RESUME/ABORT 視覺乾淨 */}
+              {floor && (
+                <g transform={`translate(${floor.originX},${floor.originY})`}>
+                  <rect x={0} y={0} width={floor.w} height={floor.h}
+                    fill="rgba(4,6,12,0.55)"/>
+                  <PausedControls face={floor} palette={palette}/>
+                </g>
+              )}
+            </g>
+          );
+        })()}
 
         {(cyberState === 'gameover-wave' || cyberState === 'gameover-final') &&
           <RedWaveOverlay palette={palette} state={state}/>}

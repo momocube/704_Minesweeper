@@ -164,7 +164,9 @@ function FloorTerminal({ face, palette, state, lockedCellId, lockedFaceName, loc
     return null;
   }
   if (state === "paused") {
-    return <PausedControls face={face} palette={palette}/>;
+    // PausedControls + mask 在 cyber-app.js 統一 render 在所有 face 上面,
+    // 這裡留空避免被後續 face <g> 蓋掉 mask 效果
+    return null;
   }
 
   return (
@@ -302,25 +304,25 @@ function PausedControls({ face, palette }) {
 
       {/* 左:RESUME */}
       <g transform={`translate(${halfW * 0.5}, ${cy + 60})`}
-         style={{filter: `drop-shadow(0 0 16px ${palette.accent})`}}>
-        <g stroke={palette.accent} strokeWidth={4} fill="none" opacity={0.85}>
-          <polyline points="-220,-40 -260,-40 -260,0"/>
-          <polyline points="220,-40 260,-40 260,0"/>
-          <polyline points="-220,160 -260,160 -260,100"/>
-          <polyline points="220,160 260,160 260,100"/>
+         style={{filter: `drop-shadow(0 0 12px ${palette.accent})`}}>
+        <g stroke={palette.accent} strokeWidth={3} fill="none" opacity={0.8}>
+          <polyline points="-150,-26 -180,-26 -180,4"/>
+          <polyline points="150,-26 180,-26 180,4"/>
+          <polyline points="-150,90 -180,90 -180,60"/>
+          <polyline points="150,90 180,90 180,60"/>
         </g>
-        <text x={0} y={-90} textAnchor="middle"
-          fontFamily="JetBrains Mono" fontSize={22}
+        <text x={0} y={-58} textAnchor="middle"
+          fontFamily="JetBrains Mono" fontSize={16}
           fill={palette.accent} letterSpacing="0.3em" fontWeight={500}>
           // STEP HERE TO
         </text>
         <text x={0} y={20} textAnchor="middle"
-          fontFamily="Orbitron" fontSize={130} fontWeight={900}
+          fontFamily="Orbitron" fontSize={72} fontWeight={900}
           fill={palette.accent} letterSpacing="0.10em">
           ▶ RESUME
         </text>
-        <text x={0} y={80} textAnchor="middle"
-          fontFamily="JetBrains Mono" fontSize={26}
+        <text x={0} y={60} textAnchor="middle"
+          fontFamily="JetBrains Mono" fontSize={18}
           fill="rgba(143,168,184,0.85)" letterSpacing="0.2em">
           繼續遊戲
         </text>
@@ -328,25 +330,25 @@ function PausedControls({ face, palette }) {
 
       {/* 右:ABORT */}
       <g transform={`translate(${halfW * 1.5}, ${cy + 60})`}
-         style={{filter: `drop-shadow(0 0 16px ${palette.danger})`}}>
-        <g stroke={palette.danger} strokeWidth={4} fill="none" opacity={0.85}>
-          <polyline points="-220,-40 -260,-40 -260,0"/>
-          <polyline points="220,-40 260,-40 260,0"/>
-          <polyline points="-220,160 -260,160 -260,100"/>
-          <polyline points="220,160 260,160 260,100"/>
+         style={{filter: `drop-shadow(0 0 12px ${palette.danger})`}}>
+        <g stroke={palette.danger} strokeWidth={3} fill="none" opacity={0.8}>
+          <polyline points="-150,-26 -180,-26 -180,4"/>
+          <polyline points="150,-26 180,-26 180,4"/>
+          <polyline points="-150,90 -180,90 -180,60"/>
+          <polyline points="150,90 180,90 180,60"/>
         </g>
-        <text x={0} y={-90} textAnchor="middle"
-          fontFamily="JetBrains Mono" fontSize={22}
+        <text x={0} y={-58} textAnchor="middle"
+          fontFamily="JetBrains Mono" fontSize={16}
           fill={palette.danger} letterSpacing="0.3em" fontWeight={500}>
           // STEP HERE TO
         </text>
         <text x={0} y={20} textAnchor="middle"
-          fontFamily="Orbitron" fontSize={130} fontWeight={900}
+          fontFamily="Orbitron" fontSize={72} fontWeight={900}
           fill={palette.danger} letterSpacing="0.10em">
           ◼ ABORT
         </text>
-        <text x={0} y={80} textAnchor="middle"
-          fontFamily="JetBrains Mono" fontSize={26}
+        <text x={0} y={60} textAnchor="middle"
+          fontFamily="JetBrains Mono" fontSize={18}
           fill="rgba(143,168,184,0.85)" letterSpacing="0.2em">
           結束 · 回到待機
         </text>
@@ -454,4 +456,4 @@ function CenterButton({ kind, cx, cy, size, palette }) {
   );
 }
 
-Object.assign(window, { FaceHUD, FloorTerminal });
+Object.assign(window, { FaceHUD, FloorTerminal, PausedControls });

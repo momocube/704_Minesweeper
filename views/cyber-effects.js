@@ -1,5 +1,100 @@
 // ── Visual effects: face frame, scan overlays, red wave ──
 
+// ── Entrance dynamic backdrop ─────────────────────────
+// 低調動態:5 條 code rain + 慢掃光帶 + 中央散光暈 + 右上慢眨警示
+// SMIL animation 跑在 GPU compositor,不卡 React;clipPath 確保不溢出 face 邊界
+function EntranceBackdrop({ face, palette }) {
+  const { w, h, id } = face;
+  const clipId = `ent-clip-${id}`;
+  const beamGradId = `ent-beam-${id}`;
+  const scopeGradId = `ent-scope-${id}`;
+
+  const HEX = '0123456789ABCDEF';
+  const COLS = 5;
+  const LINES_PER_COL = 24;
+  const lineH = 22;
+  const totalH = LINES_PER_COL * lineH;
+
+  const columns = Array.from({ length: COLS }, (_, ci) => ({
+    x: ((ci + 0.5) / COLS) * w,
+    dur: 18 + ((ci * 7) % 12),
+    delay: -((ci * 41) % 25),
+    chars: Array.from({ length: LINES_PER_COL }, (_, li) =>
+      HEX[(ci * 13 + li * 7) % 16] + HEX[(ci * 19 + li * 11 + 3) % 16]),
+  }));
+
+  return (
+    <g pointerEvents="none">
+      <defs>
+        <clipPath id={clipId}>
+          <rect x={0} y={0} width={w} height={h}/>
+        </clipPath>
+        <linearGradient id={beamGradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={palette.primary} stopOpacity="0"/>
+          <stop offset="50%" stopColor={palette.primary} stopOpacity="0.28"/>
+          <stop offset="100%" stopColor={palette.primary} stopOpacity="0"/>
+        </linearGradient>
+        <radialGradient id={scopeGradId} cx="0.5" cy="0.5" r="0.55">
+          <stop offset="0%" stopColor={palette.primary} stopOpacity="0.10"/>
+          <stop offset="60%" stopColor={palette.primary} stopOpacity="0.03"/>
+          <stop offset="100%" stopColor={palette.primary} stopOpacity="0"/>
+        </radialGradient>
+      </defs>
+
+      <g clipPath={`url(#${clipId})`}>
+        {/* 中央光暈 */}
+        <rect x={0} y={0} width={w} height={h} fill={`url(#${scopeGradId})`}/>
+
+        {/* code rain — 每條 column 獨立週期 + 不同 begin offset 錯開 */}
+        {columns.map((col, ci) => (
+          <g key={ci}>
+            {col.chars.map((ch, li) => (
+              <text key={li} x={col.x} y={li * lineH}
+                textAnchor="middle"
+                fontFamily="JetBrains Mono" fontSize={16}
+                fill={palette.primary}
+                opacity={li === 0 ? 0.55 : 0.14 + ((li * 37 + ci * 23) % 12) * 0.014}
+                letterSpacing="0.08em">
+                {ch}
+              </text>
+            ))}
+            <animateTransform attributeName="transform" type="translate"
+              from={`0 ${-totalH}`} to={`0 ${h + lineH}`}
+              dur={`${col.dur}s`}
+              begin={`${col.delay}s`}
+              repeatCount="indefinite"/>
+          </g>
+        ))}
+
+        {/* 慢掃光帶 */}
+        <rect x={0} y={0} width={w} height={180}
+          fill={`url(#${beamGradId})`}>
+          <animate attributeName="y"
+            from={-180} to={h}
+            dur="11s"
+            repeatCount="indefinite"/>
+        </rect>
+
+        {/* 右上 INTRUSION BLOCKED 警示(慢眨紅點) */}
+        <g transform={`translate(${w - 30}, 36)`}>
+          <circle r={5} fill={palette.danger} className="pulse-slow"
+            style={{filter: `drop-shadow(0 0 6px ${palette.danger})`}}/>
+          <text x={-14} y={-2} textAnchor="end"
+            fontFamily="JetBrains Mono" fontSize={10}
+            fill="rgba(143,168,184,0.45)" letterSpacing="0.2em">
+            INTRUSION
+          </text>
+          <text x={-14} y={12} textAnchor="end"
+            fontFamily="JetBrains Mono" fontSize={10}
+            fill={palette.danger} letterSpacing="0.2em" opacity={0.75}>
+            BLOCKED
+          </text>
+        </g>
+      </g>
+    </g>
+  );
+}
+
 function FaceFrame({ face, palette }) {
   const { w, h, id, name } = face;
   const isInactive = name === "Entrance";
@@ -27,18 +122,12 @@ function FaceFrame({ face, palette }) {
 
       {isInactive && (
         <g>
-          <text x={w/2} y={h/2 - 14} textAnchor="middle"
-            fontFamily="JetBrains Mono" fontWeight={500} fontSize={28}
-            fill="rgba(120,140,160,0.5)" letterSpacing="0.3em">
-            // GATE.SEALED
-          </text>
-          <text x={w/2} y={h/2 + 24} textAnchor="middle"
-            fontFamily="JetBrains Mono" fontSize={16}
-            fill="rgba(80,100,120,0.5)" letterSpacing="0.25em">
-            [ NO_INTERACT ]
-          </text>
+          {/* 動態背景:慢飄 code rain + 掃描光帶 + 中央光暈 + 慢眨警示 */}
+          <EntranceBackdrop face={face} palette={palette}/>
+
+          {/* sealed 網紋(放在 backdrop 上面增加質感) */}
           <pattern id={`hatch-${id}`} patternUnits="userSpaceOnUse" width="16" height="16" patternTransform="rotate(45)">
-            <line x1="0" y1="0" x2="0" y2="16" stroke="rgba(60,80,100,0.3)" strokeWidth="1"/>
+            <line x1="0" y1="0" x2="0" y2="16" stroke="rgba(60,80,100,0.18)" strokeWidth="1"/>
           </pattern>
           <rect x={0} y={0} width={w} height={h} fill={`url(#hatch-${id})`}/>
         </g>
