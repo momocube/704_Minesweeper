@@ -35,25 +35,40 @@
 
   .stage {
     position: relative; width: 100%; height: 100%;
-    background: var(--bg-0); overflow: hidden;
+    background:
+      radial-gradient(ellipse 65% 50% at 50% 38%, rgba(0,80,120,0.18) 0%, transparent 70%),
+      radial-gradient(ellipse 70% 60% at 50% 100%, rgba(40,10,60,0.22) 0%, transparent 65%),
+      var(--bg-0);
+    overflow: hidden;
   }
+  /* 空白處的背景 — 改成大間距、低對比的圓點 + 淡淡的對角線
+     (取代之前 64px 密格 + 3px scanlines 像「TV 雜訊」的視覺) */
   .stage::before {
     content: ''; position: absolute; inset: 0;
     background-image:
-      linear-gradient(to right, var(--bg-grid) 1px, transparent 1px),
-      linear-gradient(to bottom, var(--bg-grid) 1px, transparent 1px);
-    background-size: 64px 64px; opacity: 0.25; pointer-events: none;
+      radial-gradient(circle at center, rgba(143,168,184,0.18) 0.5px, transparent 1.2px),
+      linear-gradient(135deg,
+        transparent 0%, transparent 49.6%,
+        rgba(143,168,184,0.05) 49.6%, rgba(143,168,184,0.05) 50.4%,
+        transparent 50.4%, transparent 100%);
+    background-size: 96px 96px, 192px 192px;
+    background-position: 0 0, 0 0;
+    opacity: 0.6;
+    pointer-events: none;
+    mask-image: radial-gradient(ellipse 80% 70% at center, transparent 0%, transparent 30%, #000 95%);
+    -webkit-mask-image: radial-gradient(ellipse 80% 70% at center, transparent 0%, transparent 30%, #000 95%);
   }
+  /* Scanlines 改成非常稀疏(預設 tw.scanlines=false,操作員可從 Tweaks 開啟) */
   .stage.scan::after {
     content: ''; position: absolute; inset: 0;
-    background: repeating-linear-gradient(to bottom, transparent 0px, transparent 3px,
-      rgba(0, 255, 229, 0.025) 3px, rgba(0, 255, 229, 0.025) 4px);
+    background: repeating-linear-gradient(to bottom, transparent 0px, transparent 6px,
+      rgba(0, 255, 229, 0.018) 6px, rgba(0, 255, 229, 0.018) 7px);
     pointer-events: none; mix-blend-mode: screen;
-    animation: scan-drift 8s linear infinite;
+    animation: scan-drift 14s linear infinite;
   }
   @keyframes scan-drift {
     from { background-position-y: 0; }
-    to { background-position-y: 64px; }
+    to { background-position-y: 96px; }
   }
   .stage .vignette {
     position: absolute; inset: 0;
@@ -332,7 +347,9 @@ const TWEAK_DEFAULTS = {
   "state": "playing",
   "palette": "cyan-magenta",
   "anim": "medium",
-  "scanlines": true,
+  // 預設關掉 scanlines — 之前的 3px 重複線條疊在 64px 格紋上看起來像
+  // TV 雜訊壞掉,改用乾淨的 radial gradient + 大間距圓點背景
+  "scanlines": false,
   "vignette": true,
   "cellStyle": "hologram"
 };

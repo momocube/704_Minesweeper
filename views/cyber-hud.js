@@ -18,14 +18,29 @@ function FaceHUD({ face, palette, mineCount, flaggedCount, revealedCount, totalS
   const w = (rect.rot === 0 || rect.rot === 180) ? rect.w : rect.h;
   const h = (rect.rot === 0 || rect.rot === 180) ? rect.h : rect.w;
 
+  // mode 顯示 = HUD 底色變色(不是另起一欄文字)
+  // playing 時:整條 HUD 底色 = 該模式色(低 opacity);切換時 CSS transition 0.5s 滑順過渡
+  const isPlaying = state === "playing";
+  const modeBgColor = (isPlaying && currentMode === 'flag')   ? palette.secondary
+                    : (isPlaying && currentMode === 'reveal') ? palette.accent
+                    : palette.primary;
+  const modeEdgeColor = modeBgColor;
+
   return (
     <g>
+      {/* 底色:用 CSS transition 讓 fill 在 mode 變化時滑順過渡 0.5s */}
       <rect x={rect.x} y={rect.y} width={rect.w} height={rect.h}
-        fill="rgba(0, 255, 229, 0.03)"/>
-      {reserved === "top" && <rect x={rect.x} y={rect.y + rect.h - 3} width={rect.w} height={3} fill={palette.primary} opacity={0.7}/>}
-      {reserved === "bottom" && <rect x={rect.x} y={rect.y} width={rect.w} height={3} fill={palette.primary} opacity={0.7}/>}
-      {reserved === "left" && <rect x={rect.x + rect.w - 3} y={rect.y} width={3} height={rect.h} fill={palette.primary} opacity={0.7}/>}
-      {reserved === "right" && <rect x={rect.x} y={rect.y} width={3} height={rect.h} fill={palette.primary} opacity={0.7}/>}
+        fill={modeBgColor} opacity={isPlaying ? 0.13 : 0.04}
+        style={{transition: 'fill 0.5s ease-out, opacity 0.5s ease-out'}}/>
+      {/* 內側邊緣亮線(朝向 game area 那一邊),也跟著 mode 色 */}
+      {reserved === "top" && <rect x={rect.x} y={rect.y + rect.h - 3} width={rect.w} height={3}
+        fill={modeEdgeColor} opacity={0.75} style={{transition: 'fill 0.5s ease-out'}}/>}
+      {reserved === "bottom" && <rect x={rect.x} y={rect.y} width={rect.w} height={3}
+        fill={modeEdgeColor} opacity={0.75} style={{transition: 'fill 0.5s ease-out'}}/>}
+      {reserved === "left" && <rect x={rect.x + rect.w - 3} y={rect.y} width={3} height={rect.h}
+        fill={modeEdgeColor} opacity={0.75} style={{transition: 'fill 0.5s ease-out'}}/>}
+      {reserved === "right" && <rect x={rect.x} y={rect.y} width={3} height={rect.h}
+        fill={modeEdgeColor} opacity={0.75} style={{transition: 'fill 0.5s ease-out'}}/>}
 
       <HUDTicks rect={rect} reserved={reserved} palette={palette}/>
 
@@ -71,14 +86,7 @@ function HUDContent({ w, h, face, palette, mineCount, flaggedCount, revealedCoun
   const wide = w > 800;
   const minesLeft = mineCount - flaggedCount;
   const timerStr = state === "idle" ? "00:00" : fmtTime(elapsedMs ?? 0);
-
-  // 模式提示色 + 字 — 只在 playing 顯示;mode 變化時加 mode-flash 動畫
-  // label 短一點(MARK / SCAN 兩字)讓字級可以拉大、跟 timer 不擠在一起
-  const showMode = state === "playing" && (currentMode === 'flag' || currentMode === 'reveal');
-  const modeColor = currentMode === 'flag' ? palette.secondary : palette.accent;
-  const modeLabel = currentMode === 'flag' ? 'MARK' : 'SCAN';
-  const modeGlyph = currentMode === 'flag' ? '⚑' : '◎';
-  const modeSub   = currentMode === 'flag' ? 'TOGGLE FLAG' : 'REVEAL CELL';
+  // mode 由 HUD 底色顯示(在 FaceHUD 那層處理),這裡內容不再放 MODE 欄
 
   if (wide) {
     // MODE 自己佔一個欄,放在 callsign 跟 timer 之間,跟 SAFE/THREAT 一樣
@@ -96,24 +104,6 @@ function HUDContent({ w, h, face, palette, mineCount, flaggedCount, revealedCoun
             {`${face.cols}×${face.rows}_GRID`}
           </text>
         </g>
-
-        {/* MODE column — 跟 callsign / 計時器並排,字級拉大、有自己的 vertical bar */}
-        {showMode && (
-          <g key={`mode-${currentMode}`} className="mode-flash"
-             transform={`translate(${w * 0.28}, ${h/2})`}>
-            <rect x={0} y={-36} width={6} height={72} fill={modeColor}
-              style={{filter: `drop-shadow(0 0 6px ${modeColor})`}}/>
-            <text x={20} y={-14} fontFamily="JetBrains Mono" fontSize={16}
-              fill="rgba(143,168,184,0.7)" letterSpacing="0.3em" fontWeight={500}>
-              MODE
-            </text>
-            <text x={20} y={26} fontFamily="Orbitron" fontWeight={900} fontSize={42}
-              fill={modeColor} letterSpacing="0.18em"
-              style={{filter: `drop-shadow(0 0 10px ${modeColor})`}}>
-              {`${modeGlyph} ${modeLabel}`}
-            </text>
-          </g>
-        )}
 
         <g transform={`translate(${w/2}, ${h/2})`}>
           <text x={0} y={-22} fontFamily="JetBrains Mono" fontSize={14}
@@ -152,30 +142,21 @@ function HUDContent({ w, h, face, palette, mineCount, flaggedCount, revealedCoun
     );
   }
 
-  // 窄面(主要是 Wall Right Little):垂直堆疊,各自有間距、MODE 字級也拉大
+  // 窄面 (Wall Right Little) — mode 由 HUD 底色顯示,文字保持簡潔三層
   return (
     <g>
-      <text x={w/2} y={h*0.18} fontFamily="JetBrains Mono" fontSize={13}
+      <text x={w/2} y={h*0.30} fontFamily="JetBrains Mono" fontSize={14}
         fill={palette.primary} textAnchor="middle" letterSpacing="0.2em" fontWeight={500}>
         {`// ${face.id}`}
       </text>
-      <text x={w/2} y={h*0.42} fontFamily="Orbitron" fontWeight={700} fontSize={32}
+      <text x={w/2} y={h*0.58} fontFamily="Orbitron" fontWeight={700} fontSize={36}
         fill={state === "idle" ? "rgba(143,168,184,0.5)" : palette.primary}
         textAnchor="middle" letterSpacing="0.05em"
         style={{filter: state !== "idle" ? `drop-shadow(0 0 6px ${palette.primary})` : 'none'}}>
         {timerStr}
       </text>
-      {showMode && (
-        <g key={`mode-${currentMode}`} className="mode-flash">
-          <text x={w/2} y={h*0.70} fontFamily="Orbitron" fontWeight={900} fontSize={26}
-            fill={modeColor} textAnchor="middle" letterSpacing="0.18em"
-            style={{filter: `drop-shadow(0 0 6px ${modeColor})`}}>
-            {`${modeGlyph} ${modeLabel}`}
-          </text>
-        </g>
-      )}
-      <text x={w/2} y={h*0.92} fontFamily="JetBrains Mono" fontSize={11}
-        fill="rgba(143,168,184,0.55)" textAnchor="middle" letterSpacing="0.15em">
+      <text x={w/2} y={h*0.82} fontFamily="JetBrains Mono" fontSize={12}
+        fill="rgba(143,168,184,0.6)" textAnchor="middle" letterSpacing="0.15em">
         {`${revealedCount}/${totalSafe} · T:${String(minesLeft).padStart(2,'0')}`}
       </text>
     </g>
