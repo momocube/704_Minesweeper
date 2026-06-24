@@ -4,12 +4,32 @@ import {
   SENSOR_PER_CELL_X, SENSOR_PER_CELL_Y, RESERVED_TOP_ROWS,
 } from './board.js';
 
-const LOCK_TIMEOUT_MS = 5000;
-// 3 board cells × 3 board cells centered on Floor
+// ── Floor button layout (chip coords) ──────────────────────
+// All buttons are 6 chip cols × 12 chip rows = 192×192 venue px.
+// The main row band (rows 58..69) is shared between phases: in playing it
+// hosts MARK + SCAN, in idle/gameOver it hosts a single CENTER button
+// (start / restart), and in paused it hosts RESUME (mark slot) + ABORT
+// (scan slot). PAUSE sits in its own band (rows 104..115) so it never
+// collides with the main row.
+const BTN_ROW_MIN = 58,  BTN_ROW_MAX = 70;     // main row band
+const PAUSE_ROW_MIN = 104, PAUSE_ROW_MAX = 116;
+const CENTER_COL_MIN = 19, CENTER_COL_MAX = 25; // START / RESET / PAUSE share
+const MARK_COL_MIN   = 13, MARK_COL_MAX   = 19; // MARK (playing) / RESUME (paused)
+const SCAN_COL_MIN   = 25, SCAN_COL_MAX   = 31; // SCAN (playing) / ABORT (paused)
+
+function inBox(col, row, colMin, colMax, rowMin, rowMax) {
+  return col >= colMin && col < colMax && row >= rowMin && row < rowMax;
+}
+
+const FLOOR_BUTTONS = {
+  center: { colMin: CENTER_COL_MIN, colMax: CENTER_COL_MAX, rowMin: BTN_ROW_MIN,   rowMax: BTN_ROW_MAX },
+  mark:   { colMin: MARK_COL_MIN,   colMax: MARK_COL_MAX,   rowMin: BTN_ROW_MIN,   rowMax: BTN_ROW_MAX },
+  scan:   { colMin: SCAN_COL_MIN,   colMax: SCAN_COL_MAX,   rowMin: BTN_ROW_MIN,   rowMax: BTN_ROW_MAX },
+  pause:  { colMin: CENTER_COL_MIN, colMax: CENTER_COL_MAX, rowMin: PAUSE_ROW_MIN, rowMax: PAUSE_ROW_MAX },
+};
+
+// 3 board cells × 3 board cells for views that still want a single legacy size.
 const RESTART_BTN_BOARD_CELLS = 3;
-// PAUSE button: 3 board cells centered horizontally, near bottom of Floor (chip rows 104..115)
-const PAUSE_BTN_CHIP_ROW_MIN = 104;
-const PAUSE_BTN_CHIP_ROW_MAX = 116; // exclusive (12 chip rows = 3 board rows)
 
 export class Game {
   constructor(venue, topology, options = {}) {
@@ -29,10 +49,8 @@ export class Game {
     this.faceMap = built.faceMap;
     this.mineCount = built.mineCount;
     this.total = built.total;
-    this.lockedCellId = null;
-    this._lockTimer = null;
-    this.phase = 'idle'; // 'idle' | 'playing' | 'paused' | 'gameOver'
-    this.gameOver = false; // back-compat alias; mirrors phase === 'gameOver'
+    this.phase = 'idle';        // 'idle' | 'playing' | 'paused' | 'gameOver'
+    this.gameOver = false;      // mirrors phase === 'gameOver'
     this.won = false;
     this.revealedCount = 0;
     this.gameStartMs = null;
@@ -40,6 +58,10 @@ export class Game {
     this.pausedAt = null;
     this.bombCellId = null;
     this.redWave = null;
+    // Persistent input mode — replaces the old lock-then-confirm flow.
+    // Default to 'reveal' so a freshly started game responds to wall touches
+    // immediately (first-click safety still protects the first reveal).
+    this.currentMode = 'reveal';
   }
 
   _startGame() {
@@ -54,12 +76,10 @@ export class Game {
     if (this.phase !== 'playing') return;
     this.phase = 'paused';
     this.pausedAt = Date.now();
-    this._clearLocked();
   }
 
   _resumeGame() {
     if (this.phase !== 'paused') return;
-    // 把 gameStartMs 往後推 = 不算暫停的時間
     const pausedDuration = Date.now() - this.pausedAt;
     this.gameStartMs += pausedDuration;
     this.pausedAt = null;
@@ -75,6 +95,8 @@ export class Game {
       reservedTopRows: RESERVED_TOP_ROWS,
       restartBtnBoardCells: RESTART_BTN_BOARD_CELLS,
       phase: this.phase,
+      currentMode: this.currentMode,
+      floorButtons: FLOOR_BUTTONS,
       faces: allFaceNames.map(name => {
         const f = this.venue.faces.find(x => x.name === name);
         if (!f) return null;
@@ -96,7 +118,9 @@ export class Game {
         };
       }).filter(Boolean),
       cells: this.cells.map(c => this._publicCell(c)),
-      lockedCellId: this.lockedCellId,
+      // legacy field kept null for views/wall.js / views/floor.js / views/all.js
+      // which still reference it; new view ignores it
+      lockedCellId: null,
       mineCount: this.mineCount,
       flaggedCount: this._countFlagged(),
       revealedCount: this.revealedCount,
@@ -105,7 +129,7 @@ export class Game {
       gameStartMs: this.gameStartMs,
       gameEndMs: this.gameEndMs,
       pausedAt: this.pausedAt,
-      pauseBtnRows: { min: PAUSE_BTN_CHIP_ROW_MIN, max: PAUSE_BTN_CHIP_ROW_MAX },
+      pauseBtnRows: { min: PAUSE_ROW_MIN, max: PAUSE_ROW_MAX }, // legacy
       bombCellId: this.bombCellId,
       redWave: this.redWave,
     };
@@ -133,116 +157,86 @@ export class Game {
   handleTouch(faceName, sensorCol, sensorRow) {
     if (faceName === ENTRANCE_FACE_NAME) return;
 
-    // idle: only Floor center button → start game
+    // idle: only Floor CENTER → start game
     if (this.phase === 'idle') {
-      if (faceName === FLOOR_FACE_NAME && this._isCenterButton(sensorCol, sensorRow)) {
+      if (faceName === FLOOR_FACE_NAME && this._inBtn('center', sensorCol, sensorRow)) {
         this._startGame();
         this._emit({ type: 'game-start', snapshot: this.snapshot() });
       }
       return;
     }
 
-    // gameOver: only Floor center button → reset to IDLE (不再 auto-start;玩家要主動再按開始)
+    // gameOver: only Floor CENTER → reset to idle (玩家要再按一次開始才開新局)
     if (this.phase === 'gameOver') {
-      if (faceName === FLOOR_FACE_NAME && this._isCenterButton(sensorCol, sensorRow)) {
+      if (faceName === FLOOR_FACE_NAME && this._inBtn('center', sensorCol, sensorRow)) {
         this._reset();
         this._emit({ type: 'reset', snapshot: this.snapshot() });
       }
       return;
     }
 
-    // paused: 左半 = resume / 右半 = abort (回 idle);其他面 / 其他位置忽略
+    // paused: MARK slot = resume / SCAN slot = abort
     if (this.phase === 'paused') {
-      if (faceName === FLOOR_FACE_NAME) {
-        const floorMeta = this.venue.faces.find(f => f.name === FLOOR_FACE_NAME);
-        const isLeft = sensorCol < floorMeta.colCount / 2;
-        if (isLeft) {
-          this._resumeGame();
-          this._emit({ type: 'resume', snapshot: this.snapshot() });
-        } else {
-          this._reset();
-          this._emit({ type: 'reset', snapshot: this.snapshot() });
-        }
+      if (faceName !== FLOOR_FACE_NAME) return;
+      if (this._inBtn('mark', sensorCol, sensorRow)) {
+        this._resumeGame();
+        this._emit({ type: 'resume', snapshot: this.snapshot() });
+      } else if (this._inBtn('scan', sensorCol, sensorRow)) {
+        this._reset();
+        this._emit({ type: 'reset', snapshot: this.snapshot() });
       }
       return;
     }
 
-    // playing phase
+    // playing
     if (faceName === FLOOR_FACE_NAME) {
-      // 優先檢查 PAUSE 按鈕(底部中央 3 board cells × 3)
-      if (this._isPauseButton(sensorCol, sensorRow)) {
+      // PAUSE sits in its own row band, check first
+      if (this._inBtn('pause', sensorCol, sensorRow)) {
         this._pauseGame();
         this._emit({ type: 'pause', snapshot: this.snapshot() });
         return;
       }
-      const floorMeta = this.venue.faces.find(f => f.name === FLOOR_FACE_NAME);
-      const isLeft = sensorCol < floorMeta.colCount / 2;
-      this._applyMode(isLeft ? 'flag' : 'reveal');
+      if (this._inBtn('mark', sensorCol, sensorRow)) {
+        this._setMode('flag');
+        return;
+      }
+      if (this._inBtn('scan', sensorCol, sensorRow)) {
+        this._setMode('reveal');
+        return;
+      }
+      // Outside button areas — ignore (floor is otherwise inert during play)
       return;
     }
 
     if (BOARD_FACE_NAMES.includes(faceName)) {
       const cellId = sensorToBoardId(faceName, sensorCol, sensorRow, this.faceMap);
       if (cellId == null) return; // reserved row or out of bounds
-      this._setLocked(cellId);
+      this._applyModeToCell(cellId);
     }
   }
 
-  _isPauseButton(sensorCol, sensorRow) {
-    const floorMeta = this.venue.faces.find(f => f.name === FLOOR_FACE_NAME);
-    if (!floorMeta) return false;
-    const cxChip = Math.floor(floorMeta.colCount / 2);
-    const halfW = (RESTART_BTN_BOARD_CELLS * SENSOR_PER_CELL_X) / 2; // = 3
-    return sensorCol >= cxChip - halfW && sensorCol < cxChip + halfW &&
-           sensorRow >= PAUSE_BTN_CHIP_ROW_MIN && sensorRow < PAUSE_BTN_CHIP_ROW_MAX;
+  _inBtn(name, col, row) {
+    const b = FLOOR_BUTTONS[name];
+    return inBox(col, row, b.colMin, b.colMax, b.rowMin, b.rowMax);
   }
 
-  _isCenterButton(sensorCol, sensorRow) {
-    const floorMeta = this.venue.faces.find(f => f.name === FLOOR_FACE_NAME);
-    if (!floorMeta) return false;
-    const cxChip = Math.floor(floorMeta.colCount / 2);
-    const cyChip = Math.floor(floorMeta.rowCount / 2);
-    const halfW = (RESTART_BTN_BOARD_CELLS * SENSOR_PER_CELL_X) / 2;
-    const halfH = (RESTART_BTN_BOARD_CELLS * SENSOR_PER_CELL_Y) / 2;
-    return sensorCol >= cxChip - halfW && sensorCol < cxChip + halfW &&
-           sensorRow >= cyChip - halfH && sensorRow < cyChip + halfH;
+  _setMode(mode) {
+    if (this.currentMode === mode) return;
+    this.currentMode = mode;
+    // Small delta — view just needs to flip the highlighted button. Avoid
+    // resending the full snapshot for what is a 1-field change.
+    this._emit({ type: 'mode-change', mode });
   }
 
-  _setLocked(cellId) {
-    if (this.cells[cellId].revealed) {
-      this._clearLocked();
-      return;
-    }
-    this.lockedCellId = cellId;
-    if (this._lockTimer) clearTimeout(this._lockTimer);
-    this._lockTimer = setTimeout(() => this._clearLocked(), LOCK_TIMEOUT_MS);
-    this._emit({ type: 'lock', cellId, lockTimeoutMs: LOCK_TIMEOUT_MS });
-  }
-
-  _clearLocked() {
-    if (this._lockTimer) { clearTimeout(this._lockTimer); this._lockTimer = null; }
-    if (this.lockedCellId == null) return;
-    this.lockedCellId = null;
-    this._emit({ type: 'unlock' });
-  }
-
-  _applyMode(mode) {
-    const id = this.lockedCellId;
-    if (id == null) {
-      this._emit({ type: 'mode-feedback', mode, accepted: false });
-      return;
-    }
-    const cell = this.cells[id];
-    this._emit({ type: 'mode-feedback', mode, accepted: true, cellId: id });
-
+  _applyModeToCell(cellId) {
+    const cell = this.cells[cellId];
+    const mode = this.currentMode;
     if (mode === 'flag') {
-      if (cell.revealed) { this._clearLocked(); return; }
+      if (cell.revealed) return;
       cell.flagged = !cell.flagged;
       this._emit({ type: 'cell-update', cells: [this._publicCell(cell)], flaggedCount: this._countFlagged() });
-      this._clearLocked();
     } else if (mode === 'reveal') {
-      if (cell.revealed || cell.flagged) { this._clearLocked(); return; }
-      // 第一次揭露保護:確保第一次踩的格 + 8 鄰居都不是地雷(經典踩地雷規則)
+      if (cell.revealed || cell.flagged) return;
       if (this.revealedCount === 0) this._ensureFirstRevealSafe(cell);
       if (cell.mine) {
         this._handleMineHit(cell);
@@ -250,25 +244,22 @@ export class Game {
       }
       const updated = this._floodReveal(cell);
       this._emit({ type: 'cell-update', cells: updated.map(c => this._publicCell(c)), revealedCount: this.revealedCount });
-      this._clearLocked();
       if (this.revealedCount === this.total - this.mineCount) this._handleWin();
     }
   }
 
   _ensureFirstRevealSafe(targetCell) {
-    // 把 target + 鄰居中的雷搬到安全區外(剩下非雷格中隨機選)
     const safeIds = new Set([targetCell.id, ...targetCell.neighbors]);
     const minesToMove = [...safeIds].filter(id => this.cells[id].mine);
     if (minesToMove.length === 0) return;
     const candidates = this.cells.filter(c => !c.mine && !safeIds.has(c.id)).map(c => c.id);
-    if (candidates.length < minesToMove.length) return; // 安全格不夠搬,放棄
+    if (candidates.length < minesToMove.length) return;
     for (const mineId of minesToMove) {
       const idx = Math.floor(Math.random() * candidates.length);
       const swapId = candidates.splice(idx, 1)[0];
       this.cells[mineId].mine = false;
       this.cells[swapId].mine = true;
     }
-    // 重算所有 adjacent
     for (const c of this.cells) {
       c.adjacent = c.neighbors.filter(nid => this.cells[nid].mine).length;
     }
@@ -303,10 +294,7 @@ export class Game {
     this.gameEndMs = Date.now();
     cell.revealed = true;
     this.bombCellId = cell.id;
-    this._clearLocked();
 
-    // 紅波依「畫布空間距離」擴散,涵蓋全部面區域(包括 HUD reserved / Floor / Entrance,
-    // 不只 game cells —— 不然 HUD 留白看起來像紅波沒蓋完)
     const CELL_PX = 64;
     const bombFace = this.venue.faces.find(f => f.name === cell.faceName);
     const bx = bombFace.originX + (cell.col + 0.5) * CELL_PX;
@@ -316,7 +304,7 @@ export class Game {
     for (const face of this.venue.faces) {
       const facCols = Math.floor(face.colCount / SENSOR_PER_CELL_X);
       const facRows = Math.floor(face.rowCount / SENSOR_PER_CELL_Y);
-      const fm = this.faceMap.get(face.name); // null for Floor/Entrance
+      const fm = this.faceMap.get(face.name);
       for (let c = 0; c < facCols; c++) {
         for (let r = 0; r < facRows; r++) {
           const cx = face.originX + (c + 0.5) * CELL_PX;
@@ -325,7 +313,7 @@ export class Game {
             faceName: face.name,
             col: c, row: r,
             dist: Math.hypot(cx - bx, cy - by),
-            cellId: fm?.grid?.[c]?.[r] ?? null, // null for reserved / non-board faces
+            cellId: fm?.grid?.[c]?.[r] ?? null,
           });
         }
       }
@@ -337,7 +325,6 @@ export class Game {
       hitCellId: cell.id, redWave: wave,
       snapshot: this.snapshot(),
     });
-    // no auto-reset; wait for Floor restart-button press
   }
 
   _handleWin() {
@@ -346,7 +333,6 @@ export class Game {
     this.won = true;
     this.gameEndMs = Date.now();
     this._emit({ type: 'game-over', won: true, snapshot: this.snapshot() });
-    // no auto-reset; wait for Floor restart-button press
   }
 
   reset() {

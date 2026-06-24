@@ -144,14 +144,23 @@ function HUDContent({ w, h, face, palette, mineCount, flaggedCount, revealedCoun
   );
 }
 
-function FloorTerminal({ face, palette, state, lockedCellId, lockedFaceName, lockedCol, lockedRow }) {
+// Floor button geometry — 192×192 venue px each, chip-aligned, exactly
+// matching server/game.js's FLOOR_BUTTONS so a physical step on the button
+// area triggers the server-side action it visually represents.
+//   MARK   chips 13..18 × 58..69  → face-local (416, 928) to (608, 1120)
+//   CENTER chips 19..24 × 58..69  → face-local (608, 928) to (800, 1120)
+//   SCAN   chips 25..30 × 58..69  → face-local (800, 928) to (992, 1120)
+//   PAUSE  chips 19..24 × 104..115 → face-local (608,1664) to (800,1856)
+const FLOOR_BTN = 192;
+const FLOOR_BTN_ROW_Y = 928;     // top of MARK/CENTER/SCAN row
+const FLOOR_PAUSE_Y   = 1664;    // top of PAUSE row
+const FLOOR_MARK_X    = 416;
+const FLOOR_CENTER_X  = 608;
+const FLOOR_SCAN_X    = 800;
+
+function FloorTerminal({ face, palette, state, currentMode }) {
   const cx = face.w / 2;
   const cy = face.h / 2;
-  const BTN = 200;
-  const gap = 40;
-  const flagX = cx - BTN - gap/2;
-  const revX = cx + gap/2;
-  const btnY = cy - BTN/2;
   const CENTER = 192;
 
   if (state === "idle") {
@@ -160,18 +169,20 @@ function FloorTerminal({ face, palette, state, lockedCellId, lockedFaceName, loc
   if (state === "gameover-final") {
     return <CenterButton kind="endGame" cx={cx} cy={cy} size={CENTER} palette={palette}/>;
   }
-  if (state === "gameover-wave") {
-    return null;
-  }
+  if (state === "gameover-wave") return null;
   if (state === "paused") {
-    // PausedControls + mask 在 cyber-app.js 統一 render 在所有 face 上面,
-    // 這裡留空避免被後續 face <g> 蓋掉 mask 效果
+    // PausedControls 在 cyber-app.js 統一 render 在 mask 上面
     return null;
   }
 
+  const markActive = currentMode === 'flag';
+  const scanActive = currentMode === 'reveal';
+  const activeLabel = markActive ? 'MARK' : scanActive ? 'SCAN' : '—';
+  const activeColor = markActive ? palette.secondary : palette.accent;
+
   return (
     <g>
-      <g opacity={0.4}>
+      <g opacity={0.35}>
         <rect x={20} y={20} width={face.w - 40} height={face.h - 40}
           fill="none" stroke={palette.primary} strokeWidth={1} strokeDasharray="8 6"/>
         <text x={40} y={50} fontFamily="JetBrains Mono" fontSize={20}
@@ -184,41 +195,34 @@ function FloorTerminal({ face, palette, state, lockedCellId, lockedFaceName, loc
         </text>
       </g>
 
-      <rect x={0} y={0} width={face.w/2} height={face.h} fill={palette.secondary} opacity={0.04}/>
-      <rect x={face.w/2} y={0} width={face.w/2} height={face.h} fill={palette.accent} opacity={0.04}/>
-
-      <line x1={face.w/2} y1={60} x2={face.w/2} y2={face.h - 60}
-        stroke={palette.primary} strokeWidth={1} strokeDasharray="4 8" opacity={0.5}/>
-
-      <g transform={`translate(${face.w/2}, 100)`}>
-        <text x={0} y={0} fontFamily="JetBrains Mono" fontSize={22}
-          fill="rgba(143,168,184,0.6)" textAnchor="middle" letterSpacing="0.2em">
-          {lockedCellId != null ? "// CURSOR LOCKED" : "// CURSOR.IDLE"}
+      {/* MODE readout — 大字置中,顯示目前模式 */}
+      <g transform={`translate(${cx}, ${FLOOR_BTN_ROW_Y - 96})`}>
+        <text x={0} y={-22} fontFamily="JetBrains Mono" fontSize={20}
+          fill="rgba(143,168,184,0.55)" textAnchor="middle" letterSpacing="0.32em">
+          // ACTIVE MODE
         </text>
-        {lockedCellId != null && (
-          <text x={0} y={32} fontFamily="JetBrains Mono" fontSize={28}
-            fill={palette.primary} textAnchor="middle" letterSpacing="0.15em" fontWeight={500}
-            style={{filter: `drop-shadow(0 0 4px ${palette.primary})`}}>
-            {`[${lockedFaceName}] :: COL.${String(lockedCol).padStart(2,'0')} ROW.${String(lockedRow).padStart(2,'0')}`}
-          </text>
-        )}
+        <text x={0} y={28} fontFamily="Orbitron" fontWeight={900} fontSize={64}
+          fill={activeColor} textAnchor="middle" letterSpacing="0.18em"
+          style={{filter: `drop-shadow(0 0 10px ${activeColor})`}}>
+          {activeLabel}
+        </text>
+        <text x={0} y={56} fontFamily="JetBrains Mono" fontSize={14}
+          fill="rgba(143,168,184,0.45)" textAnchor="middle" letterSpacing="0.25em">
+          {markActive ? '踩牆面格子 → 切換旗子' : '踩牆面格子 → 揭露'}
+        </text>
       </g>
 
-      <TerminalButton x={flagX} y={btnY} size={BTN} palette={palette}
-        kind="flag" label="MARK" accent={palette.secondary}/>
-      <TerminalButton x={revX} y={btnY} size={BTN} palette={palette}
-        kind="reveal" label="SCAN" accent={palette.accent}/>
+      <TerminalButton x={FLOOR_MARK_X} y={FLOOR_BTN_ROW_Y} size={FLOOR_BTN} palette={palette}
+        kind="flag" label="MARK" accent={palette.secondary} active={markActive}/>
+      <TerminalButton x={FLOOR_SCAN_X} y={FLOOR_BTN_ROW_Y} size={FLOOR_BTN} palette={palette}
+        kind="reveal" label="SCAN" accent={palette.accent} active={scanActive}/>
 
-      {/* PAUSE 按鈕(在 MARK / SCAN 下方,對齊 server pause 區域)
-          server 認 chip rows 104..115 為 pause(cellPxH=16 → face-local y = 1664..1856)
-          button 192×192,以 cy=1760(chip row 110 中心)放置 → span y 1664..1856,
-          剛好落在 server 接受範圍內,且遠離 MARK/SCAN(y 924..1124),不再重疊 */}
-      <PauseButton cx={cx} cy={1760} palette={palette}/>
+      <PauseButton cx={cx} cy={FLOOR_PAUSE_Y + FLOOR_BTN/2} palette={palette}/>
 
       <g transform={`translate(${face.w/2}, ${face.h - 80})`}>
         <text x={0} y={0} fontFamily="JetBrains Mono" fontSize={18}
           fill={palette.primary} textAnchor="middle" letterSpacing="0.3em" opacity={0.5}>
-          MARK · SCAN · PAUSE
+          STEP MARK · STEP SCAN · STEP PAUSE
         </text>
       </g>
     </g>
@@ -275,92 +279,87 @@ function PauseButton({ cx, cy, palette }) {
 
 function PausedControls({ face, palette }) {
   const halfW = face.w / 2;
-  const cy = face.h / 2;
   return (
     <g>
-      {/* 半邊 tint:左綠(resume)、右紅(abort) */}
-      <rect x={0} y={0} width={halfW} height={face.h}
-        fill={palette.accent} opacity={0.10}/>
-      <rect x={halfW} y={0} width={halfW} height={face.h}
-        fill={palette.danger} opacity={0.10}/>
-      {/* 中央分隔 */}
-      <line x1={halfW} y1={60} x2={halfW} y2={face.h - 60}
-        stroke="rgba(255,255,255,0.5)" strokeWidth={3} strokeDasharray="14 18"/>
-
       {/* PAUSED banner 在頂部 */}
-      <g transform={`translate(${halfW}, 110)`}>
+      <g transform={`translate(${halfW}, ${FLOOR_BTN_ROW_Y - 100})`}>
         <text x={0} y={0} textAnchor="middle"
-          fontFamily="Orbitron" fontSize={60} fontWeight={900}
+          fontFamily="Orbitron" fontSize={56} fontWeight={900}
           fill={palette.warn} letterSpacing="0.32em"
           style={{filter: `drop-shadow(0 0 12px ${palette.warn})`}}>
           ⏸ PAUSED
         </text>
-        <text x={0} y={48} textAnchor="middle"
-          fontFamily="JetBrains Mono" fontSize={22}
-          fill="rgba(255,255,255,0.5)" letterSpacing="0.25em">
+        <text x={0} y={42} textAnchor="middle"
+          fontFamily="JetBrains Mono" fontSize={18}
+          fill="rgba(255,255,255,0.6)" letterSpacing="0.25em">
           SESSION SUSPENDED · AWAIT_OPERATOR_DECISION
         </text>
       </g>
 
-      {/* 左:RESUME */}
-      <g transform={`translate(${halfW * 0.5}, ${cy + 60})`}
-         style={{filter: `drop-shadow(0 0 12px ${palette.accent})`}}>
-        <g stroke={palette.accent} strokeWidth={3} fill="none" opacity={0.8}>
-          <polyline points="-150,-26 -180,-26 -180,4"/>
-          <polyline points="150,-26 180,-26 180,4"/>
-          <polyline points="-150,90 -180,90 -180,60"/>
-          <polyline points="150,90 180,90 180,60"/>
-        </g>
-        <text x={0} y={-58} textAnchor="middle"
-          fontFamily="JetBrains Mono" fontSize={16}
-          fill={palette.accent} letterSpacing="0.3em" fontWeight={500}>
-          // STEP HERE TO
-        </text>
-        <text x={0} y={20} textAnchor="middle"
-          fontFamily="Orbitron" fontSize={72} fontWeight={900}
-          fill={palette.accent} letterSpacing="0.10em">
-          ▶ RESUME
-        </text>
-        <text x={0} y={60} textAnchor="middle"
-          fontFamily="JetBrains Mono" fontSize={18}
-          fill="rgba(143,168,184,0.85)" letterSpacing="0.2em">
-          繼續遊戲
-        </text>
-      </g>
-
-      {/* 右:ABORT */}
-      <g transform={`translate(${halfW * 1.5}, ${cy + 60})`}
-         style={{filter: `drop-shadow(0 0 12px ${palette.danger})`}}>
-        <g stroke={palette.danger} strokeWidth={3} fill="none" opacity={0.8}>
-          <polyline points="-150,-26 -180,-26 -180,4"/>
-          <polyline points="150,-26 180,-26 180,4"/>
-          <polyline points="-150,90 -180,90 -180,60"/>
-          <polyline points="150,90 180,90 180,60"/>
-        </g>
-        <text x={0} y={-58} textAnchor="middle"
-          fontFamily="JetBrains Mono" fontSize={16}
-          fill={palette.danger} letterSpacing="0.3em" fontWeight={500}>
-          // STEP HERE TO
-        </text>
-        <text x={0} y={20} textAnchor="middle"
-          fontFamily="Orbitron" fontSize={72} fontWeight={900}
-          fill={palette.danger} letterSpacing="0.10em">
-          ◼ ABORT
-        </text>
-        <text x={0} y={60} textAnchor="middle"
-          fontFamily="JetBrains Mono" fontSize={18}
-          fill="rgba(143,168,184,0.85)" letterSpacing="0.2em">
-          結束 · 回到待機
-        </text>
-      </g>
+      {/* RESUME 在 MARK 位置,ABORT 在 SCAN 位置 — 跟其他按鈕同樣 192×192 */}
+      <PausedButton x={FLOOR_MARK_X} y={FLOOR_BTN_ROW_Y} size={FLOOR_BTN}
+        glyph="▶" label="RESUME" sub="繼續遊戲" accent={palette.accent}/>
+      <PausedButton x={FLOOR_SCAN_X} y={FLOOR_BTN_ROW_Y} size={FLOOR_BTN}
+        glyph="◼" label="ABORT" sub="結束 · 回到待機" accent={palette.danger}/>
     </g>
   );
 }
 
-function TerminalButton({ x, y, size, kind, label, palette, accent }) {
+function PausedButton({ x, y, size, glyph, label, sub, accent }) {
+  const half = size / 2;
   return (
     <g transform={`translate(${x},${y})`}>
-      <g stroke={accent} strokeWidth={4} fill="none" style={{filter: `drop-shadow(0 0 6px ${accent})`}}>
+      {/* 深色背板擋住 paused mask 透出來的 Floor 底色 */}
+      <rect x={-12} y={-12} width={size + 24} height={size + 24}
+        fill="#04060A" opacity={0.92}/>
+      {/* 主框 + 角落 brackets */}
+      <rect x={0} y={0} width={size} height={size}
+        fill={`${accent}26`} stroke={accent} strokeWidth={3}
+        style={{filter: `drop-shadow(0 0 12px ${accent})`}}
+        className="pulse-slow"/>
+      <g stroke={accent} strokeWidth={4} fill="none">
+        <polyline points={`0,30 0,0 30,0`}/>
+        <polyline points={`${size-30},0 ${size},0 ${size},30`}/>
+        <polyline points={`0,${size-30} 0,${size} 30,${size}`}/>
+        <polyline points={`${size-30},${size} ${size},${size} ${size},${size-30}`}/>
+      </g>
+      {/* glyph 置中 */}
+      <text x={half} y={half - 8} textAnchor="middle" dominantBaseline="central"
+        fontFamily="Orbitron" fontWeight={900} fontSize={size * 0.35}
+        fill={accent}
+        style={{filter: `drop-shadow(0 0 6px ${accent})`}}>
+        {glyph}
+      </text>
+      {/* label */}
+      <text x={half} y={half + size * 0.22} textAnchor="middle"
+        fontFamily="Orbitron" fontWeight={700} fontSize={22}
+        fill={accent} letterSpacing="0.18em"
+        style={{filter: `drop-shadow(0 0 4px ${accent})`}}>
+        {label}
+      </text>
+      <text x={half} y={half + size * 0.32} textAnchor="middle"
+        fontFamily="JetBrains Mono" fontSize={13}
+        fill="rgba(143,168,184,0.7)" letterSpacing="0.15em">
+        {sub}
+      </text>
+    </g>
+  );
+}
+
+function TerminalButton({ x, y, size, kind, label, palette, accent, active }) {
+  const op = active ? 1 : 0.55;
+  const sw = active ? 5 : 3;
+  return (
+    <g transform={`translate(${x},${y})`} opacity={op}>
+      {/* 主框:active 時填色高亮 + pulse */}
+      <rect x={0} y={0} width={size} height={size}
+        fill={active ? `${accent}26` : 'rgba(4,6,10,0.55)'}
+        stroke={accent} strokeWidth={sw}
+        style={{filter: active ? `drop-shadow(0 0 16px ${accent})` : `drop-shadow(0 0 4px ${accent})`}}
+        className={active ? 'pulse-slow' : ''}/>
+      {/* 角落 brackets */}
+      <g stroke={accent} strokeWidth={4} fill="none"
+         style={{filter: `drop-shadow(0 0 6px ${accent})`}}>
         <polyline points={`0,30 0,0 30,0`}/>
         <polyline points={`${size-30},0 ${size},0 ${size},30`}/>
         <polyline points={`0,${size-30} 0,${size} 30,${size}`}/>
@@ -369,7 +368,8 @@ function TerminalButton({ x, y, size, kind, label, palette, accent }) {
       {kind === "flag" && (
         <g transform={`translate(${size/2}, ${size/2 - 18})`}
            style={{filter: `drop-shadow(0 0 6px ${accent})`}}>
-          <polygon points="0,-30 26,12 -26,12" fill="none" stroke={accent} strokeWidth={4} strokeLinejoin="round"/>
+          <polygon points="0,-30 26,12 -26,12" fill={active ? accent : 'none'}
+            stroke={accent} strokeWidth={4} strokeLinejoin="round"/>
           <line x1="0" y1="-20" x2="0" y2="30" stroke={accent} strokeWidth={4}/>
         </g>
       )}
@@ -385,11 +385,11 @@ function TerminalButton({ x, y, size, kind, label, palette, accent }) {
           <circle cx="0" cy="0" r="3" fill={accent}/>
         </g>
       )}
-      <text x={size/2} y={size - 24} textAnchor="middle"
-        fontFamily="Orbitron" fontSize={26} fontWeight={700} fill={accent}
+      <text x={size/2} y={size - 22} textAnchor="middle"
+        fontFamily="Orbitron" fontSize={24} fontWeight={active ? 900 : 700} fill={accent}
         letterSpacing="0.2em"
         style={{filter: `drop-shadow(0 0 4px ${accent})`}}>
-        {label}
+        {label}{active ? ' ●' : ''}
       </text>
     </g>
   );

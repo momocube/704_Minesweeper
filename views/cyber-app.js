@@ -62,10 +62,8 @@ function useGameState() {
         } else if (msg.type === 'game-start' || msg.type === 'game-over' || msg.type === 'reset' ||
                    msg.type === 'pause' || msg.type === 'resume') {
           setState(msg.snapshot);
-        } else if (msg.type === 'lock') {
-          setState(s => s ? { ...s, lockedCellId: msg.cellId } : s);
-        } else if (msg.type === 'unlock') {
-          setState(s => s ? { ...s, lockedCellId: null } : s);
+        } else if (msg.type === 'mode-change') {
+          setState(s => s ? { ...s, currentMode: msg.mode } : s);
         } else if (msg.type === 'cell-update') {
           setState(s => {
             if (!s) return s;
@@ -200,8 +198,6 @@ function App() {
     return m;
   }, [state?.cells]);
 
-  const lockedCell = (state?.lockedCellId != null) ? state.cells[state.lockedCellId] : null;
-
   // cyber view state for FloorTerminal / RedWave overlay
   const cyberState = !state ? 'idle'
     : state.phase === 'idle' ? 'idle'
@@ -286,10 +282,7 @@ function App() {
                 <FloorGrid face={face} palette={palette}/>
                 <FloorTerminal face={face} palette={palette}
                   state={cyberState}
-                  lockedCellId={state.lockedCellId}
-                  lockedFaceName={lockedCell?.faceName}
-                  lockedCol={lockedCell?.col}
-                  lockedRow={lockedCell?.row}/>
+                  currentMode={state.currentMode}/>
               </>
             )}
 
@@ -305,7 +298,7 @@ function App() {
                          : 'hidden',
                     adjacent: cell.adjacent ?? 0,
                     mine: cell.mine,
-                    locked: cell.id === state.lockedCellId,
+                    locked: false, // legacy prop — no per-cell lock under new mode flow
                   };
                   return (
                     <g key={cell.id}

@@ -11,18 +11,23 @@ const ROOT = resolve(__dirname, '..');
 const venue = JSON.parse(await readFile(resolve(ROOT, 'config/venue-704.json'), 'utf8'));
 const topology = JSON.parse(await readFile(resolve(ROOT, 'config/board-topology.json'), 'utf8'));
 
+// chip-cell anchors for the new Floor button layout (server is the source of
+// truth; these match game.js's FLOOR_BUTTONS exactly)
+const CENTER_CHIP = [22, 64];
+const MARK_CHIP   = [16, 64];
+const SCAN_CHIP   = [28, 64];
+const PAUSE_CHIP  = [22, 110];
+
 function newGame(opts = {}) {
   return new Game(venue, topology, { mineRate: 0.15, seed: 1, ...opts });
 }
-
-// 開新遊戲並按下中央開始按鈕進到 playing phase
 function newStartedGame(opts = {}) {
   const g = newGame(opts);
-  g.handleTouch('Floor', 22, 64); // chip center → start button area
+  g.handleTouch('Floor', ...CENTER_CHIP);
   return g;
 }
 
-test('初始狀態 = idle, gameStartMs=null, phase=idle', () => {
+test('初始狀態 = idle, gameStartMs=null, phase=idle, currentMode=reveal', () => {
   const g = newGame();
   const s = g.snapshot();
   assert.equal(s.type, 'snapshot');
@@ -34,17 +39,18 @@ test('初始狀態 = idle, gameStartMs=null, phase=idle', () => {
   assert.equal(s.gameStartMs, null);
   assert.equal(s.bombCellId, null);
   assert.equal(s.redWave, null);
+  assert.equal(s.currentMode, 'reveal');
+  assert.ok(s.floorButtons.center && s.floorButtons.mark && s.floorButtons.scan && s.floorButtons.pause);
 });
 
-test('idle: 摸牆 / Floor 半邊 都被忽略', () => {
+test('idle: 摸牆 / Floor 非按鈕區 都被忽略', () => {
   const g = newGame();
   const events = [];
   g.on(e => events.push(e));
   g.handleTouch('Wall Top', 8, 12);
-  g.handleTouch('Floor', 10, 50);
-  g.handleTouch('Floor', 30, 50);
+  g.handleTouch('Floor', 10, 50);  // outside any button
+  g.handleTouch('Floor', 30, 50);  // outside any button
   assert.equal(g.phase, 'idle');
-  assert.equal(g.lockedCellId, null);
   assert.equal(events.length, 0);
 });
 
@@ -53,7 +59,7 @@ test('idle: 踩 Floor 中央按鈕 → phase=playing, gameStartMs 設定, game-s
   const events = [];
   g.on(e => events.push(e));
   const before = Date.now();
-  g.handleTouch('Floor', 22, 64); // center button
+  g.handleTouch('Floor', ...CENTER_CHIP);
   assert.equal(g.phase, 'playing');
   assert.ok(g.gameStartMs >= before);
   const gs = events.find(e => e.type === 'game-start');
@@ -73,72 +79,88 @@ test('摸 Entrance 沒有反應 (playing)', () => {
   g.on(e => events.push(e));
   g.handleTouch('Entrance', 0, 0);
   assert.equal(events.length, 0);
-  assert.equal(g.lockedCellId, null);
 });
 
-test('摸到各面 reserved 區域 → 無 lock event (Top/Bottom/Left/Right 4 個方向都檢查)', () => {
+test('摸各面 reserved 區域 → 無 cell-update', () => {
+  const g = newStartedGame(); // default mode = reveal
+  const events = [];
+  g.on(e => events.push(e));
+  g.handleTouch('Wall Top', 4, 0);     // reserved top
+  g.handleTouch('Wall Button', 4, 36); // reserved bottom
+  g.handleTouch('Wall Left', 2, 50);   // reserved left
+  g.handleTouch('Wall Right Big', 18, 10); // reserved right
+  const updates = events.filter(e => e.type === 'cell-update');
+  assert.equal(updates.length, 0);
+});
+
+test('default mode = reveal: 摸牆面 game area → 直接 reveal', () => {
   const g = newStartedGame();
-  // Wall Top: reserved top rows (sensor row 0..7)
-  g.handleTouch('Wall Top', 4, 0);
-  assert.equal(g.lockedCellId, null);
-  // Wall Button: reserved bottom rows (sensor row 32..39)
-  g.handleTouch('Wall Button', 4, 36);
-  assert.equal(g.lockedCellId, null);
-  // Wall Left: reserved left cols (sensor col 0..3)
-  g.handleTouch('Wall Left', 2, 50);
-  assert.equal(g.lockedCellId, null);
-  // Wall Right Big: reserved right cols (sensor col 16..19)
-  g.handleTouch('Wall Right Big', 18, 10);
-  assert.equal(g.lockedCellId, null);
+  const safe = g.cells.find(c => !c.mine && c.adjacent > 0);
+  g.handleTouch(safe.faceName, safe.col * 2, safe.row * 4);
+  assert.equal(g.cells[safe.id].revealed, true);
 });
 
-test('摸牆面 game area → 鎖定該格 (playing)', () => {
+test('踩 MARK 按鈕 → currentMode=flag,連續摸格 toggle flag', () => {
   const g = newStartedGame();
   const events = [];
   g.on(e => events.push(e));
-  g.handleTouch('Wall Top', 8, 12); // sensor (8,12) → board (4, 3) — game area
-  assert.notEqual(g.lockedCellId, null);
-  assert.equal(events[0].type, 'lock');
+  g.handleTouch('Floor', ...MARK_CHIP);
+  assert.equal(g.currentMode, 'flag');
+  const mc = events.find(e => e.type === 'mode-change');
+  assert.ok(mc); assert.equal(mc.mode, 'flag');
+
+  const c1 = g.cells.find(c => !c.mine);
+  g.handleTouch(c1.faceName, c1.col * 2, c1.row * 4);
+  assert.equal(g.cells[c1.id].flagged, true);
+
+  // 再摸一次 → 取消 flag
+  g.handleTouch(c1.faceName, c1.col * 2, c1.row * 4);
+  assert.equal(g.cells[c1.id].flagged, false);
+
+  // 還沒切回 reveal → 摸第二格也是 toggle flag
+  const c2 = g.cells.find(c => !c.mine && c.id !== c1.id);
+  g.handleTouch(c2.faceName, c2.col * 2, c2.row * 4);
+  assert.equal(g.cells[c2.id].flagged, true);
 });
 
-test('Floor 左半 → flag mode', () => {
+test('MARK ↔ SCAN 隨時切換', () => {
   const g = newStartedGame();
-  const target = g.cells.find(c => !c.mine);
-  g.handleTouch(target.faceName, target.col * 2, target.row * 4);
-  g.handleTouch('Floor', 10, 50);
-  assert.equal(g.cells[target.id].flagged, true);
-  assert.equal(g.lockedCellId, null);
+  assert.equal(g.currentMode, 'reveal');
+  g.handleTouch('Floor', ...MARK_CHIP);
+  assert.equal(g.currentMode, 'flag');
+  g.handleTouch('Floor', ...SCAN_CHIP);
+  assert.equal(g.currentMode, 'reveal');
+  g.handleTouch('Floor', ...MARK_CHIP);
+  assert.equal(g.currentMode, 'flag');
 });
 
-test('Floor 右半 → reveal mode', () => {
+test('Floor 非按鈕區 (playing) → 被忽略,沒 mode 切換', () => {
   const g = newStartedGame();
-  const target = g.cells.find(c => !c.mine);
-  g.handleTouch(target.faceName, target.col * 2, target.row * 4);
-  g.handleTouch('Floor', 30, 50);
-  assert.equal(g.cells[target.id].revealed, true);
+  const events = [];
+  g.on(e => events.push(e));
+  g.handleTouch('Floor', 5, 5);    // outside any button
+  g.handleTouch('Floor', 40, 80);  // outside any button
+  assert.equal(g.currentMode, 'reveal');
+  assert.equal(events.filter(e => e.type === 'mode-change').length, 0);
 });
 
-// helper: 第一次踩非雷格 (跳過 first-click safety),回傳的 game 進入「revealedCount > 0」狀態
+// helper: 第一次踩非雷格 (跳過 first-click safety)
 function gameWithFirstRevealDone() {
-  const g = newStartedGame();
+  const g = newStartedGame(); // default reveal mode
   const safe = g.cells.find(c => !c.mine);
   g.handleTouch(safe.faceName, safe.col * 2, safe.row * 4);
-  g.handleTouch('Floor', 30, 50);
   return g;
 }
 
-test('第一次揭露保護:第一次踩格 + 8 鄰居都不會是地雷 (即使本來是)', () => {
+test('第一次揭露保護:第一次踩雷格 + 8 鄰居都被搬走', () => {
   const g = newStartedGame();
-  // 強制踩一個本來是地雷的格
   const mine = g.cells.find(c => c.mine);
   g.handleTouch(mine.faceName, mine.col * 2, mine.row * 4);
-  g.handleTouch('Floor', 30, 50);
-  assert.equal(g.phase, 'playing', '第一次揭露雷格應該被搬走,沒 gameOver');
-  assert.equal(g.cells[mine.id].mine, false, '原本的雷格已不是雷');
+  assert.equal(g.phase, 'playing', '第一次揭露雷格應該被搬走');
+  assert.equal(g.cells[mine.id].mine, false);
   for (const nid of g.cells[mine.id].neighbors) {
     assert.equal(g.cells[nid].mine, false, `鄰居 ${nid} 也不能是雷`);
   }
-  // 總雷數沒變
   assert.equal(g.cells.filter(c => c.mine).length, g.mineCount);
 });
 
@@ -147,96 +169,105 @@ test('gameEndMs 在 gameOver 時被設定,reset 後清掉', async () => {
   assert.equal(g.gameEndMs, null);
   const mine = g.cells.find(c => c.mine && !c.revealed);
   g.handleTouch(mine.faceName, mine.col * 2, mine.row * 4);
-  g.handleTouch('Floor', 30, 50);
   assert.ok(g.gameEndMs != null);
   const frozen = g.gameEndMs;
   await new Promise(r => setTimeout(r, 30));
   assert.equal(g.gameEndMs, frozen);
-  g.handleTouch('Floor', 22, 64);
-  // 改了:gameOver 中央按鈕現在回到 idle (不是 auto-start)
+  g.handleTouch('Floor', ...CENTER_CHIP); // gameOver center → idle
   assert.equal(g.phase, 'idle');
   assert.equal(g.gameEndMs, null);
   assert.equal(g.gameStartMs, null);
 });
 
-test('reveal 雷 → gameOver + redWave 涵蓋整個場域 (含 HUD/Floor/Entrance)', () => {
+test('reveal 雷 → gameOver + redWave 涵蓋整個場域', () => {
   const g = gameWithFirstRevealDone();
   const mine = g.cells.find(c => c.mine && !c.revealed);
-  const events = [];
-  g.on(e => events.push(e));
   g.handleTouch(mine.faceName, mine.col * 2, mine.row * 4);
-  g.handleTouch('Floor', 30, 50);
   assert.equal(g.gameOver, true);
   assert.equal(g.bombCellId, mine.id);
   assert.ok(Array.isArray(g.redWave));
-  // 計算預期 wave 長度:5 牆面 grid + Floor + Entrance,以 sensor/2 × sensor/4 為網格
-  // Wall Left 10×32 + Wall Top 22×10 + Wall Right Big 10×20 + Wall Right little 10×4 + Wall Button 22×10
-  // + Floor 22×32 + Entrance 10×8 = 320+220+200+40+220+704+80 = 1784
-  assert.equal(g.redWave.length, 1784, 'redWave 應涵蓋所有面的整個 grid');
-  // 第一個是炸彈格本身 (dist = 0)
+  assert.equal(g.redWave.length, 1784);
   assert.equal(g.redWave[0].dist, 0);
   assert.equal(g.redWave[0].faceName, mine.faceName);
   assert.equal(g.redWave[0].col, mine.col);
   assert.equal(g.redWave[0].row, mine.row);
-  // 排序遞增
   for (let i = 1; i < g.redWave.length; i++) {
     assert.ok(g.redWave[i].dist >= g.redWave[i-1].dist);
   }
-  // game cells 都有 cellId,reserved/Floor/Entrance 是 null
   const withCellId = g.redWave.filter(w => w.cellId != null);
-  assert.equal(withCellId.length, g.cells.length, 'game cells 都應該有 cellId');
+  assert.equal(withCellId.length, g.cells.length);
 });
 
-test('gameOver 後一般觸控被忽略,只接受 Floor 中央按鈕 (現在 → 回到 idle,不 auto-start)', async () => {
+test('gameOver 後一般觸控被忽略,只接受 Floor 中央按鈕 → 回到 idle', () => {
   const g = gameWithFirstRevealDone();
   const mine = g.cells.find(c => c.mine && !c.revealed);
   g.handleTouch(mine.faceName, mine.col * 2, mine.row * 4);
-  g.handleTouch('Floor', 30, 50);
   assert.equal(g.phase, 'gameOver');
 
   g.handleTouch('Wall Top', 8, 12);
-  assert.equal(g.phase, 'gameOver', 'wall touch should not reset');
+  assert.equal(g.phase, 'gameOver');
 
   g.handleTouch('Floor', 5, 5);
-  assert.equal(g.phase, 'gameOver', 'Floor non-center touch should not reset');
-
-  g.handleTouch('Floor', 22, 64); // center → 回到 idle
-  assert.equal(g.phase, 'idle', 'gameOver center button → idle (not playing)');
-  assert.equal(g.gameStartMs, null, 'gameStartMs cleared');
-  assert.equal(g.gameEndMs, null, 'gameEndMs cleared');
-
-  // 玩家必須再按 start
-  g.handleTouch('Floor', 22, 64);
-  assert.equal(g.phase, 'playing', 'idle center button → playing');
-});
-
-test('Restart 按鈕邊界: chips 19..24 × 58..69 (回 idle,不 auto-start)', () => {
-  const g = gameWithFirstRevealDone();
-  const mine = g.cells.find(c => c.mine && !c.revealed);
-  g.handleTouch(mine.faceName, mine.col * 2, mine.row * 4);
-  g.handleTouch('Floor', 30, 50);
-  g.handleTouch('Floor', 18, 64);
   assert.equal(g.phase, 'gameOver');
-  g.handleTouch('Floor', 19, 64);
+
+  g.handleTouch('Floor', ...CENTER_CHIP);
   assert.equal(g.phase, 'idle');
+  assert.equal(g.gameStartMs, null);
+  assert.equal(g.gameEndMs, null);
+
+  g.handleTouch('Floor', ...CENTER_CHIP);
+  assert.equal(g.phase, 'playing');
 });
 
-test('Start 按鈕邊界相同 (idle 期間, chips 18 outside, 19 inside)', () => {
-  const g = newGame();
-  g.handleTouch('Floor', 18, 64);
-  assert.equal(g.phase, 'idle', 'outside center → still idle');
-  g.handleTouch('Floor', 19, 64);
-  assert.equal(g.phase, 'playing', 'inside center → playing');
+test('Center 按鈕邊界: chip cols 19..24 × rows 58..69', () => {
+  const g1 = newGame();
+  g1.handleTouch('Floor', 18, 64); // col 18 外側
+  assert.equal(g1.phase, 'idle');
+  g1.handleTouch('Floor', 19, 64); // 邊界內
+  assert.equal(g1.phase, 'playing');
+
+  const g2 = newGame();
+  g2.handleTouch('Floor', 22, 57); // row 57 外側
+  assert.equal(g2.phase, 'idle');
+  g2.handleTouch('Floor', 22, 58); // 邊界內
+  assert.equal(g2.phase, 'playing');
+
+  const g3 = newGame();
+  g3.handleTouch('Floor', 25, 64); // col 25 外側 (max exclusive)
+  assert.equal(g3.phase, 'idle');
+  g3.handleTouch('Floor', 24, 64); // 邊界內
+  assert.equal(g3.phase, 'playing');
 });
 
-test('Floor 沒鎖定格時踩按鈕 → mode-feedback accepted=false', () => {
+test('MARK / SCAN 按鈕邊界 (cols 13..18 / 25..30, rows 58..69)', () => {
   const g = newStartedGame();
-  const events = [];
-  g.on(e => events.push(e));
-  g.handleTouch('Floor', 10, 50);
-  const fb = events.find(e => e.type === 'mode-feedback');
-  assert.ok(fb);
-  assert.equal(fb.accepted, false);
+  g.handleTouch('Floor', 12, 64); // MARK col 12 外
+  assert.equal(g.currentMode, 'reveal');
+  g.handleTouch('Floor', 13, 64); // MARK col 13 內
+  assert.equal(g.currentMode, 'flag');
+  g.handleTouch('Floor', 31, 64); // SCAN col 31 外
+  assert.equal(g.currentMode, 'flag');
+  g.handleTouch('Floor', 30, 64); // SCAN col 30 內
+  assert.equal(g.currentMode, 'reveal');
+});
+
+test('flag 已揭露格 → no-op', () => {
+  const g = gameWithFirstRevealDone();
+  const revealed = g.cells.find(c => c.revealed);
+  g.handleTouch('Floor', ...MARK_CHIP);
+  g.handleTouch(revealed.faceName, revealed.col * 2, revealed.row * 4);
+  assert.equal(g.cells[revealed.id].flagged, false);
+});
+
+test('reveal 已 flag 格 → no-op', () => {
+  const g = newStartedGame();
+  g.handleTouch('Floor', ...MARK_CHIP);
+  const safe = g.cells.find(c => !c.mine);
+  g.handleTouch(safe.faceName, safe.col * 2, safe.row * 4);
+  assert.equal(g.cells[safe.id].flagged, true);
+  g.handleTouch('Floor', ...SCAN_CHIP);
+  g.handleTouch(safe.faceName, safe.col * 2, safe.row * 4);
+  assert.equal(g.cells[safe.id].revealed, false);
 });
 
 test('reveal 0 格 → flood-fill 擴散', () => {
@@ -244,16 +275,15 @@ test('reveal 0 格 → flood-fill 擴散', () => {
   const zeroCell = g.cells.find(c => !c.mine && c.adjacent === 0);
   assert.ok(zeroCell);
   g.handleTouch(zeroCell.faceName, zeroCell.col * 2, zeroCell.row * 4);
-  g.handleTouch('Floor', 30, 50);
   assert.ok(g.revealedCount > 1);
 });
 
 // ── PAUSE / RESUME / ABORT ─────────────────────────────
-test('playing 中踩 PAUSE 按鈕(chip 22, 110) → 進入 paused phase + pausedAt 設定', () => {
+test('playing 中踩 PAUSE 按鈕 → 進入 paused phase', () => {
   const g = newStartedGame();
   const events = [];
   g.on(e => events.push(e));
-  g.handleTouch('Floor', 22, 110);
+  g.handleTouch('Floor', ...PAUSE_CHIP);
   assert.equal(g.phase, 'paused');
   assert.ok(g.pausedAt != null);
   assert.equal(events.find(e => e.type === 'pause')?.snapshot.phase, 'paused');
@@ -261,48 +291,46 @@ test('playing 中踩 PAUSE 按鈕(chip 22, 110) → 進入 paused phase + paused
 
 test('PAUSE 按鈕邊界 chip cols 19..24 × rows 104..115', () => {
   const g = newStartedGame();
-  // 邊界外
-  g.handleTouch('Floor', 18, 110);
-  assert.equal(g.phase, 'playing', 'col 18 外側');
-  g.handleTouch('Floor', 22, 103);
-  assert.equal(g.phase, 'playing', 'row 103 外側');
-  // 邊界內
-  g.handleTouch('Floor', 19, 104);
-  assert.equal(g.phase, 'paused', 'col 19 row 104 邊界內');
+  g.handleTouch('Floor', 18, 110); // col 18 外
+  assert.equal(g.phase, 'playing');
+  g.handleTouch('Floor', 22, 103); // row 103 外
+  assert.equal(g.phase, 'playing');
+  g.handleTouch('Floor', 19, 104); // 邊界內
+  assert.equal(g.phase, 'paused');
 });
 
-test('paused → 左半 = resume → 回到 playing,gameStartMs 推後扣除暫停時間', async () => {
+test('paused → MARK slot = resume → 回到 playing, gameStartMs 推後扣除暫停時間', async () => {
   const g = newStartedGame();
   const originalStart = g.gameStartMs;
   await new Promise(r => setTimeout(r, 20));
-  g.handleTouch('Floor', 22, 110); // pause
+  g.handleTouch('Floor', ...PAUSE_CHIP);
   assert.equal(g.phase, 'paused');
-  const pausedAtBefore = g.pausedAt;
   await new Promise(r => setTimeout(r, 50));
-  g.handleTouch('Floor', 10, 50); // 左半 → resume
+  g.handleTouch('Floor', ...MARK_CHIP);
   assert.equal(g.phase, 'playing');
   assert.equal(g.pausedAt, null);
-  // gameStartMs 被推後了 (約 50ms),讓 elapsedMs 不算暫停那 50ms
-  assert.ok(g.gameStartMs > originalStart, 'gameStartMs 應該被推後');
+  assert.ok(g.gameStartMs > originalStart);
 });
 
-test('paused → 右半 = abort → 回到 idle', () => {
+test('paused → SCAN slot = abort → 回到 idle', () => {
   const g = newStartedGame();
-  g.handleTouch('Floor', 22, 110); // pause
+  g.handleTouch('Floor', ...PAUSE_CHIP);
   assert.equal(g.phase, 'paused');
-  g.handleTouch('Floor', 30, 50); // 右半 → abort
+  g.handleTouch('Floor', ...SCAN_CHIP);
   assert.equal(g.phase, 'idle');
   assert.equal(g.gameStartMs, null);
   assert.equal(g.pausedAt, null);
 });
 
-test('paused 時牆面 / 中央按鈕 / 其他面都被忽略', () => {
+test('paused 時牆面 / 中央按鈕 / Floor 非按鈕區 / Entrance 都被忽略', () => {
   const g = newStartedGame();
-  g.handleTouch('Floor', 22, 110); // pause
+  g.handleTouch('Floor', ...PAUSE_CHIP);
   assert.equal(g.phase, 'paused');
   g.handleTouch('Wall Top', 8, 12);
   assert.equal(g.phase, 'paused');
-  g.handleTouch('Wall Left', 5, 50);
+  g.handleTouch('Floor', ...CENTER_CHIP); // center button inert during paused
+  assert.equal(g.phase, 'paused');
+  g.handleTouch('Floor', 5, 5);
   assert.equal(g.phase, 'paused');
   g.handleTouch('Entrance', 0, 0);
   assert.equal(g.phase, 'paused');
