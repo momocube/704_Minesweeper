@@ -214,6 +214,93 @@
     color: var(--text-dim); font-size: 11px; margin-left: 16px;
   }
   .broadcast-menu .bmi:hover .meta { color: var(--text); }
+
+  /* ─ Sensor lock pill + control card ─ */
+  .lock-pill {
+    position: fixed; top: 16px; left: 16px; z-index: 1100;
+    display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(8,14,22,0.92);
+    border: 1px solid rgba(143,168,184,0.4);
+    color: var(--text-bright);
+    padding: 8px 14px; font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; letter-spacing: 0.22em; font-weight: 500;
+    cursor: pointer; user-select: none;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .lock-pill:hover { background: rgba(143,168,184,0.10); }
+  .lock-pill .lock-icon { font-size: 14px; }
+  .lock-pill.active {
+    color: #ff8a8a; border-color: #ff8a8a;
+    background: rgba(255,80,80,0.10);
+    box-shadow: 0 0 14px rgba(255,80,80,0.30);
+  }
+  .lock-pill.filtering .lock-filter {
+    color: #ffc26b; text-shadow: 0 0 8px rgba(255,180,80,0.55);
+    margin-left: 4px;
+  }
+
+  .lock-card {
+    position: fixed; top: 64px; left: 16px; z-index: 1100;
+    width: 320px;
+    background: rgba(8,14,22,0.94);
+    border: 1px solid rgba(120,160,255,0.45);
+    padding: 14px 16px;
+    color: var(--text-bright);
+    font-family: 'JetBrains Mono', monospace;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.7), 0 0 18px rgba(120,160,255,0.18);
+  }
+  .lock-card .lc-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 12px; font-weight: 700;
+    letter-spacing: 0.22em; color: #b0c8ff;
+    text-shadow: 0 0 6px rgba(120,160,255,0.45);
+    margin-bottom: 8px;
+  }
+  .lock-card .lc-sub {
+    font-size: 11px; color: var(--text); opacity: 0.75;
+    letter-spacing: 0.05em; line-height: 1.5;
+    margin-bottom: 12px;
+  }
+  .lock-card .lc-stats {
+    display: flex; gap: 18px; padding: 10px 0;
+    border-top: 1px solid rgba(120,160,255,0.18);
+    border-bottom: 1px solid rgba(120,160,255,0.18);
+    margin-bottom: 12px;
+    font-size: 12px; letter-spacing: 0.15em; color: var(--text);
+  }
+  .lock-card .lc-n {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 20px; font-weight: 700; margin-right: 6px;
+  }
+  .lock-card .lc-n-locked { color: #ff8a8a; text-shadow: 0 0 6px rgba(255,120,120,0.45); }
+  .lock-card .lc-n-hot    { color: #ffd166; text-shadow: 0 0 6px rgba(255,200,80,0.45); }
+  .lock-card .lc-actions {
+    display: flex; gap: 8px;
+  }
+  .lock-card button {
+    flex: 1; padding: 8px 12px;
+    background: rgba(120,160,255,0.10);
+    border: 1px solid rgba(120,160,255,0.40);
+    color: var(--text-bright);
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 0.18em; cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .lock-card button:hover:not(:disabled) {
+    background: rgba(120,160,255,0.20);
+  }
+  .lock-card button:disabled { opacity: 0.35; cursor: not-allowed; }
+  .lock-card button.primary {
+    background: rgba(120,160,255,0.22);
+    border-color: rgba(180,210,255,0.65);
+    color: #e7f0ff;
+  }
+  .lock-card button.primary:hover { background: rgba(120,160,255,0.32); }
+
+  /* projector mode hides both */
+  #root.projector-mode .lock-pill,
+  #root.projector-mode .lock-card { display: none !important; }
 </style>
 </head>
 <body>
@@ -242,6 +329,7 @@ const TWEAK_DEFAULTS = {
 <script type="text/babel" src="/cyber-cells.js"></script>
 <script type="text/babel" src="/cyber-hud.js"></script>
 <script type="text/babel" src="/cyber-effects.js"></script>
+<script type="text/babel" src="/cyber-lock.js"></script>
 <script type="text/babel" src="/cyber-app.js"></script>
 </body>
 </html>

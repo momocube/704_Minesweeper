@@ -6,6 +6,7 @@ import { WebSocketServer } from 'ws';
 
 import { TouchClient } from './touch-client.js';
 import { Game } from './game.js';
+import { SensorLock, lockKey } from './sensor-lock.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -20,6 +21,13 @@ const game = new Game(venue, topology, {
   mineRate: Number(process.env.MINE_RATE ?? 0.15),
   seed: process.env.SEED ? Number(process.env.SEED) : null,
 });
+
+// Sensor-cell calibration / blacklist (filter misfiring chips before they
+// reach Game). Persisted to ~/.704-minesweeper/sensor-lock.json so a venue
+// calibration survives portable-exe re-extraction.
+const sensorLock = new SensorLock();
+await sensorLock.load();
+console.log(`[sensor-lock] loaded ${sensorLock.lockedCells.size} locked cell(s) from ${sensorLock.persistPath}`);
 
 const MIME = {
   html: 'text/html;charset=utf-8',
@@ -60,16 +68,52 @@ const clients = new Set();
 wss.on('connection', (ws) => {
   clients.add(ws);
   ws.send(JSON.stringify(game.snapshot()));
+  ws.send(JSON.stringify(sensorLock.getSnapshot()));
   ws.on('message', (data) => {
     let msg;
     try { msg = JSON.parse(data.toString()); } catch { return; }
+
     if (msg.type === 'inject-touch') {
-      game.handleTouch(msg.face, msg.sensorCol, msg.sensorRow);
+      // Mirror real sensor path so the operator can test calibration with
+      // mouse clicks: record event, auto-lock in calibration mode, drop on
+      // hit, else hand off to the game.
+      handleSensorInput(msg.face, msg.sensorCol, msg.sensorRow);
+      return;
+    }
+
+    if (msg.type === 'lock-mode-set') {
+      sensorLock.setLockMode(!!msg.on);
+      return;
+    }
+    if (msg.type === 'lock-toggle-cell') {
+      sensorLock.toggle(lockKey(msg.face, msg.sensorCol, msg.sensorRow));
+      return;
+    }
+    if (msg.type === 'lock-clear') {
+      sensorLock.clear();
+      return;
     }
   });
   ws.on('close', () => clients.delete(ws));
   ws.on('error', () => clients.delete(ws));
 });
+
+// Single funnel for both TouchService and inject-touch — filter once, route
+// to Game once. Operator-facing UI talks to this through the same path.
+function handleSensorInput(faceName, sensorCol, sensorRow) {
+  const k = lockKey(faceName, sensorCol, sensorRow);
+  sensorLock.recordEvent(k);
+  if (sensorLock.lockMode) {
+    // Calibration mode: every chip that fires is suspect → blacklist it.
+    sensorLock.add(k);
+    return;
+  }
+  if (sensorLock.isLocked(k)) {
+    sensorLock.noteFiltered();
+    return;
+  }
+  game.handleTouch(faceName, sensorCol, sensorRow);
+}
 
 function broadcast(msg) {
   const data = JSON.stringify(msg);
@@ -79,6 +123,7 @@ function broadcast(msg) {
 }
 
 game.on(broadcast);
+sensorLock.on(broadcast);
 
 const touch = new TouchClient(TOUCHSERVICE_URL, {
   onHello: (hello) => {
@@ -89,7 +134,7 @@ const touch = new TouchClient(TOUCHSERVICE_URL, {
   onDown: (e) => {
     const faceMeta = venue.faces[e.face];
     if (!faceMeta) return;
-    game.handleTouch(faceMeta.name, e.cell[0], e.cell[1]);
+    handleSensorInput(faceMeta.name, e.cell[0], e.cell[1]);
   },
 });
 

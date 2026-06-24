@@ -29,6 +29,7 @@ function faceContentRotation(reserved) {
 // ── WebSocket state client ───────────────────────────────
 function useGameState() {
   const [state, setState] = useState(null);
+  const [lockState, setLockState] = useState(null);
   const [conn, setConn] = useState(false);
   const wsRef = useRef(null);
 
@@ -76,6 +77,23 @@ function useGameState() {
               revealedCount: msg.revealedCount ?? s.revealedCount,
             };
           });
+        } else if (msg.type === 'lock-snapshot') {
+          setLockState({
+            lockedCells: msg.lockedCells || [],
+            lockMode: !!msg.lockMode,
+            filteredCount: msg.filteredCount || 0,
+            hotCounts: msg.hotCounts || {},
+          });
+        } else if (msg.type === 'lock-update') {
+          const s = msg.snapshot || {};
+          setLockState({
+            lockedCells: s.lockedCells || [],
+            lockMode: !!s.lockMode,
+            filteredCount: s.filteredCount || 0,
+            hotCounts: s.hotCounts || {},
+          });
+        } else if (msg.type === 'lock-stats') {
+          setLockState(p => p ? { ...p, filteredCount: msg.filteredCount || 0 } : p);
         }
       };
     };
@@ -88,7 +106,7 @@ function useGameState() {
     };
   }, []);
 
-  return { state, send, conn };
+  return { state, lockState, send, conn };
 }
 
 // ── live timer tick ─────────────────────────────────────
@@ -121,7 +139,7 @@ function useShowRestart(state) {
 
 // ── Main App ─────────────────────────────────────────────
 function App() {
-  const { state, send, conn } = useGameState();
+  const { state, lockState, send, conn } = useGameState();
   const [tw, setTw] = useState(() => {
     const saved = localStorage.getItem('cyber-tw');
     return saved ? { ...TWEAK_DEFAULTS, ...JSON.parse(saved) } : TWEAK_DEFAULTS;
@@ -197,17 +215,29 @@ function App() {
   const elapsedMs = (!state || state.gameStartMs == null) ? 0
     : (state.gameEndMs ?? state.pausedAt ?? Date.now()) - state.gameStartMs;
 
+  // Lock-mode handlers (operator UI on top of the normal game canvas)
+  const lockMode = !!lockState?.lockMode;
+  const toggleLockMode = useCallback(() => {
+    send({ type: 'lock-mode-set', on: !lockMode });
+  }, [send, lockMode]);
+  const onToggleCell = useCallback((face, col, row) => {
+    send({ type: 'lock-toggle-cell', face, sensorCol: col, sensorRow: row });
+  }, [send]);
+  const onClearLocked = useCallback(() => { send({ type: 'lock-clear' }); }, [send]);
+
   // click handlers
   const handleCellClick = useCallback((face, c, r, e) => {
     if (PROJECTOR_MODE) return;
+    if (lockMode) return; // lock overlay owns clicks while calibrating
     e.stopPropagation();
     const sensorCol = c * SENSOR_PER_CELL_X + 1;
     const sensorRow = r * SENSOR_PER_CELL_Y + 2;
     send({ type: 'inject-touch', face: face.name, sensorCol, sensorRow });
-  }, [send]);
+  }, [send, lockMode]);
 
   const handleSVGClick = useCallback((ev) => {
     if (PROJECTOR_MODE) return;
+    if (lockMode) return; // lock overlay handles all clicks via its own catchers
     if (!state || !svgRef.current) return;
     const pt = svgRef.current.createSVGPoint();
     pt.x = ev.clientX; pt.y = ev.clientY;
@@ -322,10 +352,18 @@ function App() {
 
         {(cyberState === 'gameover-wave' || cyberState === 'gameover-final') &&
           <RedWaveOverlay palette={palette} state={state}/>}
+
+        {/* Sensor lock calibration overlay — on top of everything inside the SVG */}
+        {!PROJECTOR_MODE && <LockOverlay
+          faces={state.faces} lockState={lockState}
+          onToggleCell={onToggleCell}/>}
       </svg>
 
       {!PROJECTOR_MODE && <TweaksPanel tw={tw} setTwk={setTwk} conn={conn} state={state}/>}
       {!PROJECTOR_MODE && <BroadcastBtn/>}
+      {!PROJECTOR_MODE && <LockPill lockState={lockState} onToggle={toggleLockMode}/>}
+      {!PROJECTOR_MODE && <LockControlCard lockState={lockState}
+        onClear={onClearLocked} onClose={toggleLockMode}/>}
     </div>
   );
 }
