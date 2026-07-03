@@ -12,6 +12,7 @@
     "dist": "electron-builder --win portable"
   },
   "dependencies": {
+    "osc": "^2.4.5",
     "ws": "^8.18.0"
   },
   "devDependencies": {
@@ -30,7 +31,9 @@
       "README.md"
     ],
     "win": {
-      "target": ["portable"],
+      "target": [
+        "portable"
+      ],
       "signAndEditExecutable": false
     },
     "portable": {

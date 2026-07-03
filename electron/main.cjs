@@ -7,11 +7,19 @@ const { app, BrowserWindow, ipcMain, screen, Menu } = require('electron');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const http = require('node:http');
+const osc = require('osc');
 
 const SERVER_PORT = Number(process.env.PORT ?? 3000);
 const SERVER_URL = `http://localhost:${SERVER_PORT}`;
 const CONTROLLER_URL = `${SERVER_URL}/?face=all`;
 const PROJECTOR_URL = `${SERVER_URL}/?face=all&projector=1`;
+
+// TouchOSC / OSC control — same flow as 704_GenerativeArt (UDP listener in
+// Electron main), but on port 9001 so it doesn't clash with GA when both
+// exe are running on the same operator laptop. Address prefix /704mine/…
+// distinguishes from GA's /704art/… namespace.
+const OSC_PORT = Number(process.env.OSC_PORT ?? 9001);
+let oscPort = null;
 
 const ROOT = path.join(__dirname, '..');
 const SERVER_SCRIPT = path.join(ROOT, 'server', 'index.js');
@@ -223,6 +231,83 @@ ipcMain.handle('projector:openSecondary', () => {
   return true;
 });
 
+// ── TouchOSC / OSC listener ─────────────────────────────────────
+//
+// Mirror 704_GenerativeArt's flow: iPad running TouchOSC sends UDP OSC
+// messages to <laptop IP>:9001, this listener routes them to the same
+// openProjector() / closeProjector() functions the on-screen Broadcast
+// button uses. Deliberately silent on unknown addresses so the layout
+// can share templates with GA without spamming the log.
+//
+// Namespaces:
+//   /704mine/projector/windowed    → open windowed projector (NDI/OBS capture)
+//   /704mine/projector/secondary   → open fullscreen on second display
+//   /704mine/projector/close       → close projector
+//   /704mine/projector/toggle      → close if open, else open secondary
+//   /704mine/ping                  → log-only, useful for testing TouchOSC connectivity
+
+function startOSC() {
+  if (oscPort) return;
+  oscPort = new osc.UDPPort({
+    localAddress: '0.0.0.0',
+    localPort: OSC_PORT,
+    metadata: false,
+  });
+  oscPort.on('ready', () => {
+    log(`OSC listening on udp://0.0.0.0:${OSC_PORT}`);
+  });
+  oscPort.on('message', (oscMsg) => {
+    const addr = String(oscMsg.address || '');
+    const args = oscMsg.args || [];
+    // TouchOSC 有些控件按下、放開都送(第一個 arg = 1 / 0),忽略 0 免得重複觸發
+    const primaryVal = args.length > 0 ? args[0] : null;
+    if (primaryVal === 0 || primaryVal === 0.0) return;
+    log(`OSC <- ${addr} ${JSON.stringify(args)}`);
+    handleOSC(addr, args);
+  });
+  oscPort.on('error', (err) => {
+    log('OSC error:', err && err.message ? err.message : err);
+  });
+  try {
+    oscPort.open();
+  } catch (e) {
+    log('OSC open() failed:', e && e.message ? e.message : e);
+  }
+}
+
+function stopOSC() {
+  if (!oscPort) return;
+  try { oscPort.close(); } catch {}
+  oscPort = null;
+}
+
+function handleOSC(addr, args) {
+  switch (addr) {
+    case '/704mine/projector/windowed':
+      openProjector({ windowed: true });
+      break;
+    case '/704mine/projector/secondary':
+      openProjector({ displayId: pickSecondaryDisplay().id, windowed: false });
+      break;
+    case '/704mine/projector/close':
+      closeProjector();
+      break;
+    case '/704mine/projector/toggle':
+      if (projectorWindow && !projectorWindow.isDestroyed()) {
+        closeProjector();
+      } else {
+        openProjector({ displayId: pickSecondaryDisplay().id, windowed: false });
+      }
+      break;
+    case '/704mine/ping':
+      // no-op — presence in the log is the point
+      break;
+    default:
+      // silent — TouchOSC template might have other addresses
+      break;
+  }
+}
+
 // ── App lifecycle ───────────────────────────────────────────────
 
 const gotLock = app.requestSingleInstanceLock();
@@ -249,6 +334,7 @@ app.whenReady().then(async () => {
     return;
   }
   createControllerWindow();
+  startOSC();
 });
 
 app.on('window-all-closed', () => {
@@ -258,6 +344,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   closeProjector();
+  stopOSC();
   if (serverProcess && !serverProcess.killed) {
     serverProcess.kill();
   }
