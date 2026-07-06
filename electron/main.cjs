@@ -118,6 +118,9 @@ function createControllerWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      // 別讓 Chromium 因為視窗被 Arena 蓋住就節流 JS/RAF,
+      // 不然計時器 / 動畫會凍住,NDI 抓到 stale frame
+      backgroundThrottling: false,
     },
   });
   controllerWindow.loadURL(CONTROLLER_URL);
@@ -193,6 +196,9 @@ function openProjector({ displayId, windowed }) {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      // 關鍵:Arena 蓋住投播視窗時 Chromium 會把 JS timer / RAF 節流到 <1 Hz,
+      // 造成計時器/動畫凍住,NDI 抓到的畫面卡住不動。關掉節流讓它照全速跑。
+      backgroundThrottling: false,
     },
   });
   projectorWindow.loadURL(PROJECTOR_URL);
