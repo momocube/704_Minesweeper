@@ -161,10 +161,17 @@ function openProjector({ displayId, windowed }) {
   let browserOptions;
   if (windowed) {
     const primary = screen.getPrimaryDisplay();
-    const w = 700, h = 1000;
+    // Windowed 尺寸 = NDI 輸出解析度(Dedicated NDI Output filter 抓 window 原生像素)。
+    // 拉到 1344×1920(venue 7:10 的 1080p 級別)讓 Arena 幾乎不用 upscale,
+    // 之前 700×1000 太小 → Arena 撐 3× → 明顯糊。可用 WINDOWED_W / WINDOWED_H 覆蓋。
+    const w = Number(process.env.WINDOWED_W ?? 1344);
+    const h = Number(process.env.WINDOWED_H ?? 1920);
+    // 視窗放在主螢幕右上,如果視窗比螢幕大就靠邊擺(操作員肉眼看到一部分就夠了,
+    // OBS/NDI 抓的是完整 window content,跟看得到多少無關)
+    const x = primary.bounds.x + Math.max(0, primary.bounds.width - w - 40);
+    const y = primary.bounds.y + 40;
     browserOptions = {
-      x: primary.bounds.x + Math.max(40, primary.bounds.width - w - 40),
-      y: primary.bounds.y + 40,
+      x, y,
       width: w,
       height: h,
       minWidth: 360,
