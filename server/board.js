@@ -146,9 +146,16 @@ function addCrossFaceNeighbors(faceMap, cells, edgeSpec) {
   const Na = aIds.length, Nb = bIds.length;
   if (Na === 0 || Nb === 0) return; // one side entirely reserved → no cross-face connection
   for (let i = 0; i < Na; i++) {
+    // Orthogonal band directly across the seam (proportional when edge lengths differ).
     const jLo = Math.floor(i * Nb / Na);
     const jHi = Math.min(Nb - 1, Math.max(jLo, Math.floor((i + 1) * Nb / Na) - 1));
-    for (let j = jLo; j <= jHi; j++) {
+    // Widen by one on each side so DIAGONAL neighbours across the corner are also
+    // linked. Without this every cell along the four 牆角 seams gets 6 neighbours
+    // instead of 8 → its adjacent-mine count is too low whenever a mine sits in one
+    // of the two missing diagonal cells (intermittent "機率" wrong number on corners).
+    const jStart = Math.max(0, jLo - 1);
+    const jEnd = Math.min(Nb - 1, jHi + 1);
+    for (let j = jStart; j <= jEnd; j++) {
       const aid = aIds[i], bid = bIds[j];
       if (!cells[aid].neighbors.includes(bid)) cells[aid].neighbors.push(bid);
       if (!cells[bid].neighbors.includes(aid)) cells[bid].neighbors.push(aid);

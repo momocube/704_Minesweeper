@@ -112,6 +112,43 @@ test('Wall Top.col=0,row=2 跨面連到 Wall Left.row=0,col=2 (物理頂同高�
     'Wall Top 物理頂下兩格 應該連到 Wall Left 物理頂下兩格');
 });
 
+test('牆角接合處對角鄰居也要連 (8-connectivity across seam, not 4)', () => {
+  const { cells, faceMap } = buildBoard(venue, topology, { mineRate: 0.15, seed: 1 });
+  const wt = faceMap.get('Wall Top');
+  const wl = faceMap.get('Wall Left');
+  // Wall Top.col=0 seam column joins Wall Left.row=0 seam row (edge 1, reverse=false).
+  // A mid-seam Wall Top cell should reach the across cell PLUS the two diagonals on Wall Left.
+  const wtMid = cells[wt.grid[0][5]]; // rows 2..9 valid → row 5 is interior of the seam
+  const across = wl.grid[5][0];       // same height across the corner
+  const diagUp = wl.grid[4][0];       // one step up along the corner
+  const diagDn = wl.grid[6][0];       // one step down along the corner
+  assert.ok(wtMid.neighbors.includes(across), '應連到正對面格');
+  assert.ok(wtMid.neighbors.includes(diagUp), '應連到上方對角格');
+  assert.ok(wtMid.neighbors.includes(diagDn), '應連到下方對角格');
+  // Full 8: 5 in-face (col 1 三格 + col 0 上下兩格) + 3 cross-seam
+  assert.equal(wtMid.neighbors.length, 8, '牆角中段格鄰居數應為 8');
+});
+
+test('四個牆角接合處的中段格鄰居數都 = 8 (對角有連上)', () => {
+  const { cells, faceMap } = buildBoard(venue, topology, { mineRate: 0.15, seed: 1 });
+  // Interior (non-end) seam cell on each of the four wall corners must be full 8-connected.
+  // The two extreme ends (ceiling side / floor side) legitimately have fewer, because the
+  // reserved HUD rows and the non-board Floor eat into their neighbourhood.
+  const midCells = [
+    ['Wall Top',    0,  5], // ↔ Wall Left top
+    ['Wall Top',    21, 5], // ↔ Wall Right Big top
+    ['Wall Button', 0,  4], // ↔ Wall Left bottom
+    ['Wall Button', 21, 4], // ↔ Wall Right little bottom
+  ];
+  for (const [name, col, row] of midCells) {
+    const fm = faceMap.get(name);
+    const id = fm.grid[col][row];
+    assert.notEqual(id, null, `${name}[${col}][${row}] should be a game cell`);
+    assert.equal(cells[id].neighbors.length, 8,
+      `${name} 牆角中段格 [${col}][${row}] 鄰居數 = ${cells[id].neighbors.length}, 應為 8`);
+  }
+});
+
 test('sensorToBoardId: 落在 reserved 位置 → null (Wall Top top, Wall Left left, Wall Button bottom)', () => {
   const { faceMap } = buildBoard(venue, topology, { mineRate: 0.15, seed: 1 });
   // Wall Top reserved = top rows (0,1), sensor rows 0..7
