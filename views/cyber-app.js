@@ -441,8 +441,11 @@ function App() {
                 {(cellsByFace[face.name] || []).map(cell => {
                   const rot = faceContentRotation(face.reservedSide);
                   const cellProps = {
+                    // wrongFlag 只有 server 在 gameOver 後才會給 true,要排在 flagged 前面
+                    // (誤標的格子同時也是 flagged,先比對才不會被吃掉)
                     state: (cell.revealed && cell.mine) ? 'mine'
                          : cell.revealed ? 'revealed'
+                         : cell.wrongFlag ? 'wrongFlag'
                          : cell.flagged ? 'flagged'
                          : (state.phase === 'gameOver' && cell.mine) ? 'mine'
                          : 'hidden',

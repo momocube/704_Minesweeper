@@ -59,6 +59,30 @@ function CellBracket({ cell, palette }) {
         </g>
       )}
 
+      {/* 誤標 — 只在 gameOver 後出現:淡化的旗子(你標過)+ 真實數字(其實是這個) */}
+      {state === "wrongFlag" && (
+        <g>
+          <rect x={inset} y={inset} width={s - inset*2} height={s - inset*2}
+            fill={palette.danger} opacity={0.13}/>
+          <rect x={inset} y={inset} width={s - inset*2} height={s - inset*2}
+            fill="none" stroke={palette.danger} strokeWidth={1.5} opacity={0.7}/>
+          <g opacity={0.22}>
+            <polygon points={`${s/2},${inset+10} ${s-inset-8},${s-inset-10} ${inset+8},${s-inset-10}`}
+              fill="none" stroke={palette.danger} strokeWidth={3} strokeLinejoin="round"/>
+            <line x1={s/2} y1={inset+18} x2={s/2} y2={s-inset-18} stroke={palette.danger} strokeWidth={3}/>
+          </g>
+          {adjacent > 0 ? (
+            <text x={s/2} y={s/2 + 2} className="cell-number" fontSize={38}
+              fill={palette.danger}
+              style={{filter: `drop-shadow(0 0 5px ${palette.danger})`}}>
+              {adjacent}
+            </text>
+          ) : (
+            <circle cx={s/2} cy={s/2} r={2.5} fill={palette.danger} opacity={0.8}/>
+          )}
+        </g>
+      )}
+
       {state === "revealed" && adjacent > 0 && (
         <text x={s/2} y={s/2 + 2} className="cell-number" fontSize={38}
           fill={numberColor}
@@ -159,6 +183,33 @@ function CellHologram({ cell, palette }) {
           <polygon points={`${s/2},${10} ${s-12},${s-12} ${12},${s-12}`}
             fill={palette.secondary} opacity={0.15}/>
           <circle cx={s/2} cy={s/2 + 2} r={2.5} fill={palette.secondary}/>
+        </g>
+      )}
+
+      {/* 誤標 — 只在 gameOver 後出現:淡化的旗子(你標過)+ 真實數字(其實是這個) */}
+      {state === "wrongFlag" && (
+        <g style={{filter: `drop-shadow(0 0 6px ${palette.danger})`}}>
+          <rect x={3} y={3} width={s-6} height={s-6} rx={6}
+            fill={palette.danger} opacity={0.14}/>
+          <rect x={3} y={3} width={s-6} height={s-6} rx={6}
+            fill="none" stroke={palette.danger} strokeWidth={1.5} opacity={0.75}/>
+          {/* ghost 旗子 — 標記過的痕跡,淡到不跟數字搶 */}
+          <g opacity={0.2}>
+            <polygon points={`${s/2},${10} ${s-12},${s-12} ${12},${s-12}`}
+              fill="none" stroke={palette.danger} strokeWidth={3.5} strokeLinejoin="round"/>
+          </g>
+          {adjacent > 0 ? (
+            <>
+              <circle cx={s/2} cy={s/2} r={s*0.35} fill={palette.danger} opacity={0.10}/>
+              <text x={s/2} y={s/2 + 2} className="cell-number" fontSize={36}
+                fill={palette.danger}
+                style={{filter: `drop-shadow(0 0 5px ${palette.danger}) drop-shadow(0 0 12px ${palette.danger})`}}>
+                {adjacent}
+              </text>
+            </>
+          ) : (
+            <circle cx={s/2} cy={s/2} r={2.5} fill={palette.danger} opacity={0.85}/>
+          )}
         </g>
       )}
 

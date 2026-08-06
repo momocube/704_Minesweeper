@@ -333,6 +333,67 @@ test('摸 Entrance 沒有反應 (playing)', () => {
   assert.equal(events.length, 0);
 });
 
+// ── 誤標數字提示 (只在 gameOver 後揭曉) ──────────────────────
+
+function flagCell(g, cell) {
+  g.handleTouch('Floor', ...MARK_CHIP);                     // currentMode = 'flag'
+  g.handleTouch(cell.faceName, cell.col * 2, cell.row * 4); // toggle flag
+}
+
+test('遊戲中誤標不洩漏數字 (不然 MARK 會變成零風險探測)', () => {
+  const g = newStartedGame();
+  const safe = g.cells.find(c => !c.mine && c.adjacent > 0);
+  flagCell(g, safe);
+  const pc = g.snapshot().cells.find(c => c.id === safe.id);
+  assert.equal(pc.flagged, true);
+  assert.equal(pc.wrongFlag, false, '遊戲中不該標成誤標');
+  assert.equal(pc.adjacent, null, '遊戲中不該洩漏數字');
+});
+
+test('gameOver 後誤標揭曉真實數字,但不計入已揭露', async () => {
+  const g = newGame();
+  g.setTimeLimit({ enabled: true, ms: 60 });
+  g.handleTouch('Floor', ...CENTER_CHIP);
+  const safe = g.cells.find(c => !c.mine && c.adjacent > 0);
+  flagCell(g, safe);
+  await new Promise(r => setTimeout(r, 110));
+  assert.equal(g.phase, 'gameOver');
+
+  const s = g.snapshot();
+  const pc = s.cells.find(c => c.id === safe.id);
+  assert.equal(pc.wrongFlag, true, '標了旗但不是雷 → 誤標');
+  assert.equal(pc.adjacent, safe.adjacent, '應揭曉真實鄰雷數');
+  assert.equal(pc.flagged, true, '仍維持標記狀態');
+  assert.equal(pc.revealed, false, '不該變成已揭露');
+  assert.equal(s.revealedCount, 0, '不該計入勝利進度');
+});
+
+test('gameOver 後正確標記的雷不算誤標', async () => {
+  const g = newGame();
+  g.setTimeLimit({ enabled: true, ms: 60 });
+  g.handleTouch('Floor', ...CENTER_CHIP);
+  const mine = g.cells.find(c => c.mine);
+  flagCell(g, mine);
+  await new Promise(r => setTimeout(r, 110));
+
+  const pc = g.snapshot().cells.find(c => c.id === mine.id);
+  assert.equal(pc.wrongFlag, false, '標對了不是誤標');
+  assert.equal(pc.adjacent, null, '標對的雷不顯示數字');
+  assert.equal(pc.mine, true);
+});
+
+test('gameOver 只揭曉誤標的數字,沒標的隱藏格仍不洩漏', async () => {
+  const g = newGame();
+  g.setTimeLimit({ enabled: true, ms: 60 });
+  g.handleTouch('Floor', ...CENTER_CHIP);
+  await new Promise(r => setTimeout(r, 110));
+  assert.equal(g.phase, 'gameOver');
+  for (const c of g.snapshot().cells) {
+    if (c.revealed || c.wrongFlag) continue;
+    assert.equal(c.adjacent, null, `cell ${c.id} 沒標卻洩漏了數字`);
+  }
+});
+
 test('reveal 0 格 → flood-fill 擴散', () => {
   const g = newStartedGame({ mineRate: 0.05, seed: 7 });
   const zeroCell = g.cells.find(c => !c.mine && c.adjacent === 0);

@@ -203,6 +203,10 @@ export class Game {
   }
 
   _publicCell(c) {
+    // 標記錯誤 = 玩家插了旗但底下不是雷。只在 gameOver 後才揭曉(遊戲中揭曉會讓
+    // MARK 變成零風險探測,SCAN 就沒人用了)。該格維持 flagged、不計入 revealedCount,
+    // 純粹是復盤用的數字提示。
+    const wrongFlag = this.gameOver && c.flagged && !c.mine;
     return {
       id: c.id,
       faceName: c.faceName,
@@ -210,7 +214,8 @@ export class Game {
       row: c.row,
       revealed: c.revealed,
       flagged: c.flagged,
-      adjacent: c.revealed ? c.adjacent : null,
+      adjacent: (c.revealed || wrongFlag) ? c.adjacent : null,
+      wrongFlag,
       // reveal mine identity on revealed mines OR when gameOver
       mine: ((c.revealed || this.gameOver) && c.mine) ? true : false,
     };
