@@ -149,6 +149,40 @@ test('四個牆角接合處的中段格鄰居數都 = 8 (對角有連上)', () =
   }
 });
 
+test('跨面配對的物理高度對齊 (reverse 旗標設反會被抓出來)', () => {
+  const { cells, faceMap } = buildBoard(venue, topology, { mineRate: 0.15, seed: 1 });
+  // "depth" = distance from the wall's PHYSICAL ceiling. The reserved side is always
+  // the ceiling side, so depth runs ceiling → floor on every face.
+  const depthOf = (cell) => {
+    const fm = faceMap.get(cell.faceName);
+    switch (FACE_RESERVED_SIDE[cell.faceName]) {
+      case 'top':    return cell.row;
+      case 'bottom': return fm.boardRows - 1 - cell.row;
+      case 'left':   return cell.col;
+      case 'right':  return fm.boardCols - 1 - cell.col;
+      default:       throw new Error(`no reserved side for ${cell.faceName}`);
+    }
+  };
+  // Two cells joined across a corner must sit at the same height (orthogonal) or one
+  // step apart (diagonal). A flipped `reverse` mirrors the seam — neighbour COUNTS
+  // still look right, but cells get wired to the wrong partner. This catches that.
+  let pairs = 0;
+  for (const cell of cells) {
+    for (const nid of cell.neighbors) {
+      const n = cells[nid];
+      if (n.faceName === cell.faceName) continue;
+      pairs++;
+      const d = Math.abs(depthOf(cell) - depthOf(n));
+      assert.ok(d <= 1,
+        `接錯格: ${cell.faceName}[${cell.col},${cell.row}](h=${depthOf(cell)}) <-> ` +
+        `${n.faceName}[${n.col},${n.row}](h=${depthOf(n)}) Δ=${d}`);
+    }
+  }
+  // 5 seams × 8 cells, each linking to up to 3 across (ends clamp to 2)
+  // = 5 × 22 unique pairs × 2 directions = 220
+  assert.equal(pairs, 220, '跨面配對總數');
+});
+
 test('sensorToBoardId: 落在 reserved 位置 → null (Wall Top top, Wall Left left, Wall Button bottom)', () => {
   const { faceMap } = buildBoard(venue, topology, { mineRate: 0.15, seed: 1 });
   // Wall Top reserved = top rows (0,1), sensor rows 0..7
