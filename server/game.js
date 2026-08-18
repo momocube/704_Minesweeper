@@ -30,6 +30,7 @@ const PAUSE_ROW_MIN = 104, PAUSE_ROW_MAX = 116;
 
 // Mine freeze: how long input is blocked after stepping on a mine.
 const MINE_FREEZE_MS = 5000;
+const START_COUNTDOWN_SECONDS = 3;
 
 // 3 board cells × 3 board cells — legacy snapshot field for older views.
 const RESTART_BTN_BOARD_CELLS = 3;
@@ -64,9 +65,11 @@ export class Game {
     this.topology = topology;
     this.options = options;
     this.listeners = new Set();
-    // Time-limit setting persists across game resets (operator configures once
-    // and re-uses for multiple plays). Default: disabled.
+    // Operator settings persist across game resets (configure once, reuse for rounds).
     this.timeLimit = { enabled: false, ms: 10 * 60 * 1000 };
+    // Tutorial is enabled by default. When enabled, PLAY enters a four-step tutorial;
+    // only the second PLAY after the tutorial starts the actual game clock.
+    this.tutorialEnabled = true;
     this._reset();
   }
 
@@ -79,7 +82,9 @@ export class Game {
     this.faceMap = built.faceMap;
     this.mineCount = built.mineCount;
     this.total = built.total;
-    this.phase = 'idle';        // 'idle' | 'playing' | 'paused' | 'gameOver'
+    this.phase = 'idle';        // 'idle' | 'tutorial' | 'tutorialReady' | 'countdown' | 'playing' | 'paused' | 'gameOver'
+    this.tutorialStep = null;   // 0..3 only while phase === 'tutorial'
+    this.countdownValue = null; // 3..1 only while phase === 'countdown'
     this.gameOver = false;
     this.won = false;
     this.endReason = null;      // 'win' | 'timeout' | null
@@ -94,11 +99,13 @@ export class Game {
     this._timeLimitTimer = null;
     this._timeLimitRemaining = null;
     this._freezeTimer = null;
+    this._countdownTimer = null;
   }
 
   _clearTimers() {
     if (this._timeLimitTimer) { clearTimeout(this._timeLimitTimer); this._timeLimitTimer = null; }
     if (this._freezeTimer)    { clearTimeout(this._freezeTimer);    this._freezeTimer = null; }
+    if (this._countdownTimer) { clearTimeout(this._countdownTimer); this._countdownTimer = null; }
   }
 
   setTimeLimit({ enabled, ms }) {
@@ -108,8 +115,67 @@ export class Game {
     this._emit({ type: 'time-limit', timeLimit: this.timeLimit });
   }
 
+  setTutorialEnabled(enabled) {
+    if (this.phase !== 'idle') return false;
+    this.tutorialEnabled = !!enabled;
+    this._emit({
+      type: 'tutorial-setting',
+      tutorialEnabled: this.tutorialEnabled,
+      snapshot: this.snapshot(),
+    });
+    return true;
+  }
+
+  _startTutorial() {
+    this.phase = 'tutorial';
+    this.tutorialStep = 0;
+    this.gameStartMs = null;
+    this.gameEndMs = null;
+  }
+
+  _advanceTutorial() {
+    if (this.phase !== 'tutorial') return;
+    if (this.tutorialStep < 3) {
+      this.tutorialStep++;
+      this._emit({ type: 'tutorial-step', snapshot: this.snapshot() });
+    } else {
+      this.phase = 'tutorialReady';
+      this.tutorialStep = null;
+      this._emit({ type: 'tutorial-ready', snapshot: this.snapshot() });
+    }
+  }
+
+  _startCountdown() {
+    this._clearTimers();
+    this.phase = 'countdown';
+    this.tutorialStep = null;
+    this.countdownValue = START_COUNTDOWN_SECONDS;
+    this.gameStartMs = null;
+    this.gameEndMs = null;
+    this._emit({ type: 'countdown-start', snapshot: this.snapshot() });
+
+    const intervalMs = Math.max(1, Number(this.options.countdownIntervalMs) || 1000);
+    const tick = () => {
+      if (this.phase !== 'countdown') return;
+      if (this.countdownValue > 1) {
+        this.countdownValue--;
+        this._emit({ type: 'countdown-tick', snapshot: this.snapshot() });
+        this._countdownTimer = setTimeout(tick, intervalMs);
+      } else {
+        // Keep 1 visible for its full interval, then enter the real game. There is
+        // deliberately no GO frame.
+        this._countdownTimer = null;
+        this._startGame();
+        this._emit({ type: 'game-start', snapshot: this.snapshot() });
+      }
+    };
+    this._countdownTimer = setTimeout(tick, intervalMs);
+  }
+
   _startGame() {
     this.phase = 'playing';
+    this.countdownValue = null;
+    this.tutorialStep = null;
     this.gameOver = false;
     this.won = false;
     this.endReason = null;
@@ -160,6 +226,10 @@ export class Game {
       reservedTopRows: RESERVED_TOP_ROWS,
       restartBtnBoardCells: RESTART_BTN_BOARD_CELLS,
       phase: this.phase,
+      tutorialEnabled: this.tutorialEnabled,
+      tutorialStep: this.tutorialStep,
+      tutorialTotal: 4,
+      countdownValue: this.countdownValue,
       currentMode: this.currentMode,
       floorButtons: FLOOR_BUTTONS,
       faces: allFaceNames.map(name => {
@@ -243,14 +313,39 @@ export class Game {
     // Mine-freeze: block all inputs while frozen
     if (this.freezeUntil != null && Date.now() < this.freezeUntil) return;
 
-    // idle: inner circle → start
+    // idle: center PLAY → tutorial (default) or direct game start (operator-disabled)
     if (this.phase === 'idle') {
       if (faceName === FLOOR_FACE_NAME && this._inCenterCircle(sensorCol, sensorRow)) {
-        this._startGame();
-        this._emit({ type: 'game-start', snapshot: this.snapshot() });
+        if (this.tutorialEnabled) {
+          this._startTutorial();
+          this._emit({ type: 'tutorial-start', snapshot: this.snapshot() });
+        } else {
+          this._startCountdown();
+        }
       }
       return;
     }
+
+    // tutorial: only the center CONTINUE button is active. Walls, MARK ring and
+    // PAUSE are deliberately inert so the tutorial cannot mutate the real board.
+    if (this.phase === 'tutorial') {
+      if (faceName === FLOOR_FACE_NAME && this._inCenterCircle(sensorCol, sensorRow)) {
+        this._advanceTutorial();
+      }
+      return;
+    }
+
+    // tutorial complete: center PLAY starts the synchronized 3-2-1 countdown.
+    if (this.phase === 'tutorialReady') {
+      if (faceName === FLOOR_FACE_NAME && this._inCenterCircle(sensorCol, sensorRow)) {
+        this._startCountdown();
+      }
+      return;
+    }
+
+    // Countdown is completely input-locked. Server owns the timer so reconnecting
+    // clients all see the same value and cannot restart/skip it with another touch.
+    if (this.phase === 'countdown') return;
 
     // gameOver: inner circle → reset to idle
     if (this.phase === 'gameOver') {

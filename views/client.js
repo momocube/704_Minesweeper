@@ -45,6 +45,15 @@ export class StateClient {
       case 'mode-feedback':
         this.h.onModeFeedback?.(msg);
         break;
+      case 'tutorial-start':
+      case 'tutorial-step':
+      case 'tutorial-ready':
+      case 'tutorial-setting':
+      case 'countdown-start':
+      case 'countdown-tick':
+        this.state = msg.snapshot;
+        this.h.onTutorial?.(msg);
+        break;
       case 'game-start':
         this.state = msg.snapshot;
         this.h.onGameStart?.(msg);

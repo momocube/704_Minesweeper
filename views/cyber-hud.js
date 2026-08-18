@@ -171,12 +171,22 @@ const MARK_OUTER_R   = 290;   // mark 環變薄(80 venue px)
 const FLOOR_PAUSE_Y  = 1664;
 const FLOOR_BTN      = 192;
 
-function FloorTerminal({ face, palette, state, currentMode }) {
+function FloorTerminal({ face, palette, state, currentMode, tutorialStep=0, tutorialTotal=4, countdownValue=null }) {
   const cx = face.w / 2;
   const cy = face.h / 2;
 
   if (state === "idle") {
-    return <CenterButton kind="start" cx={cx} cy={cy} r={SCAN_INNER_R} palette={palette}/>;
+    return <CenterButton kind="play" cx={cx} cy={cy} r={SCAN_INNER_R} palette={palette}/>;
+  }
+  if (state === "tutorial") {
+    return <CenterButton kind="continue" cx={cx} cy={cy} r={SCAN_INNER_R}
+      palette={palette} progress={`${tutorialStep + 1} / ${tutorialTotal}`}/>;
+  }
+  if (state === "tutorialReady") {
+    return <CenterButton kind="playReady" cx={cx} cy={cy} r={SCAN_INNER_R} palette={palette}/>;
+  }
+  if (state === "countdown") {
+    return <CountdownFloor cx={cx} cy={cy} palette={palette} value={countdownValue}/>;
   }
   if (state === "gameover-final") {
     return <CenterButton kind="endGame" cx={cx} cy={cy} r={SCAN_INNER_R} palette={palette}/>;
@@ -362,6 +372,21 @@ function PauseButton({ cx, cy, palette }) {
   );
 }
 
+function CountdownFloor({ cx, cy, palette, value }) {
+  const color = value === 3 ? palette.accent : value === 2 ? palette.warn : palette.danger;
+  return (
+    <g pointerEvents="none">
+      <circle cx={cx} cy={cy} r={SCAN_INNER_R + 28} fill="#04060A" opacity={0.97}/>
+      <circle cx={cx} cy={cy} r={SCAN_INNER_R} fill={color} fillOpacity={0.14}
+        stroke={color} strokeWidth={4} style={{filter:`drop-shadow(0 0 18px ${color})`}}/>
+      <text x={cx} y={cy - 18} textAnchor="middle" dominantBaseline="central"
+        fontFamily="Orbitron" fontSize={146} fontWeight={900} fill={color}>{value}</text>
+      <text x={cx} y={cy + 108} textAnchor="middle" fontFamily="Orbitron"
+        fontSize={28} fontWeight={700} fill={color} letterSpacing="0.16em">GET READY</text>
+    </g>
+  );
+}
+
 function PausedControls({ face, palette }) {
   const cx = face.w / 2;
   const cy = face.h / 2;
@@ -395,13 +420,18 @@ function PausedControls({ face, palette }) {
 
 // CenterButton — 跟 donut 統一視覺風格,在 idle / gameOver 顯示成一個圓圈
 // (跟 playing 的 inner SCAN 圓同位置同半徑,讓動作位置在所有 phase 都一致)
-function CenterButton({ kind, cx, cy, r, palette }) {
-  const accent = kind === "start" ? palette.accent : palette.danger;
-  const glyph = kind === "start" ? "▶" : (kind === "endGame" ? "⏏" : "↻");
-  const label = kind === "start" ? "EXECUTE.START"
+function CenterButton({ kind, cx, cy, r, palette, progress=null }) {
+  const isPlay = kind === "play" || kind === "playReady";
+  const isContinue = kind === "continue";
+  const accent = (isPlay || isContinue) ? (isContinue ? palette.primary : palette.accent) : palette.danger;
+  const glyph = isContinue ? "›" : isPlay ? "▶" : (kind === "endGame" ? "⏏" : "↻");
+  const label = isContinue ? "CONTINUE"
+              : isPlay ? "PLAY"
               : kind === "endGame" ? "RETURN.STANDBY"
               : "EXECUTE.RESET";
-  const sub   = kind === "start" ? "踩入以啟動"
+  const sub   = isContinue ? `STEP ${progress}`
+              : kind === "playReady" ? "開始正式遊戲"
+              : kind === "play" ? "踩入觀看教學"
               : kind === "endGame" ? "結束 · 回到待機"
               : "踩入以重啟";
   return (

@@ -103,6 +103,13 @@ wss.on('connection', (ws) => {
       }
       return;
     }
+
+    if (msg.type === 'set-tutorial-enabled') {
+      // Per-round tutorial setting, default ON. Like time limit, only the idle
+      // setup screen can change it so all displays stay on one server-owned flow.
+      game.setTutorialEnabled(!!msg.enabled);
+      return;
+    }
   });
   ws.on('close', () => clients.delete(ws));
   ws.on('error', () => clients.delete(ws));

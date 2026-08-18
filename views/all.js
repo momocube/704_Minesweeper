@@ -211,6 +211,7 @@ export function init() {
     for (const face of state.faces) drawFace(face);
     if (!state.gameOver && state.lockedCellId != null) drawLockedHighlight();
     if (state.gameOver && state.redWave && !state.won) drawRedWave();
+    if (state.phase === 'gameOver' && state.endReason === 'timeout') drawTimeoutOnWalls();
 
     drawFloorOverlay();
   }
@@ -240,10 +241,14 @@ export function init() {
         ctx.fillRect(0, 0, face.width, face.height);
       }
     } else if (face.isBoard) {
-      ctx.fillStyle = '#0a0a0a';
-      ctx.fillRect(0, 0, face.width, face.height);
-      drawBoard(face);
-      drawHud(face);
+      if (state.phase === 'tutorial' || state.phase === 'tutorialReady' || state.phase === 'countdown') {
+        drawStandaloneTutorialFace(face);
+      } else {
+        ctx.fillStyle = '#0a0a0a';
+        ctx.fillRect(0, 0, face.width, face.height);
+        drawBoard(face);
+        drawHud(face);
+      }
     }
 
     ctx.strokeStyle = '#1d1d22';
@@ -391,6 +396,162 @@ export function init() {
     }
   }
 
+  function drawStandaloneTutorialFace(face) {
+    const W=face.width,H=face.height;
+    const grad=ctx.createRadialGradient(W/2,H/2,0,W/2,H/2,Math.max(W,H)*.72);
+    grad.addColorStop(0,'#071521');grad.addColorStop(.58,'#040a12');grad.addColorStop(1,'#02040a');
+    ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle='rgba(0,255,229,.10)';ctx.lineWidth=1;
+    const gs=Math.max(48,Math.min(W,H)*.12);
+    for(let x=0;x<W;x+=gs){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+    for(let y=0;y<H;y+=gs){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+    ctx.strokeStyle='#00ffe5';ctx.lineWidth=3;ctx.strokeRect(7,7,W-14,H-14);
+    const main=new Set(['Wall Top','Wall Left','Wall Button','Wall Right Big']);
+    const rot=hudRotation(face.reservedSide),rw=(rot===0||rot===180)?W:H,rh=(rot===0||rot===180)?H:W;
+    ctx.save();ctx.translate(W/2,H/2);ctx.rotate(rot*Math.PI/180);ctx.translate(-rw/2,-rh/2);
+    if(!main.has(face.name)){
+      ctx.restore();ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);return;
+    }
+    if(state.phase==='countdown'){
+      const value=state.countdownValue,color=value===3?'#39ff14':value===2?'#ffb000':'#ff1744';
+      drawText('GAME STARTING',rw/2,rh*.20,Math.min(rw*.028,rh*.06),'#00ffe5','700');
+      ctx.shadowColor=color;ctx.shadowBlur=30;
+      drawText(String(value),rw/2,rh*.58,Math.min(rw*.26,rh*.52),color,'900');ctx.shadowBlur=0;
+      drawText('準備開始',rw/2,rh*.86,Math.min(rw*.032,rh*.07),'#e8f9fc','700');
+      ctx.restore();return;
+    }
+    if(state.phase==='tutorialReady'){
+      ctx.shadowColor='#39ff14';ctx.shadowBlur=24;
+      drawText('READY',rw/2,rh*.36,Math.min(rw*.085,rh*.18),'#39ff14','900');ctx.shadowBlur=0;
+      ctx.strokeStyle='rgba(57,255,20,.55)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(rw*.32,rh*.45);ctx.lineTo(rw*.68,rh*.45);ctx.stroke();
+      drawText('教學完成',rw/2,rh*.58,Math.min(rw*.043,rh*.09),'#e8f9fc','800');
+      drawText('如果準備好了，按下 PLAY 開始遊戲',rw/2,rh*.73,Math.min(rw*.034,rh*.075),'#e8f9fc','800');
+      drawText('PLAY IS ON THE FLOOR CENTER',rw/2,rh*.86,Math.min(rw*.019,rh*.042),'#00ffe5','700');
+      ctx.restore();return;
+    }
+    const step=state.tutorialStep??0,titles=['SCAN & MARK','九宮格邏輯','時間與 THREAT','PAUSE 與其他按鈕'];
+    drawText(`TUTORIAL ${step+1}/4`,rw*.05,rh*.08,Math.min(22,rw*.022),'#00ffe5','700','left');
+    // Header sits above the canonical content band (card top = rh*0.228).
+    drawText(titles[step],rw/2,rh*.17,Math.min(48,rw*.048,rh*.095),'#e8f9fc','900');
+    if(step===0){drawModeCards(rw,rh);}
+    else if(step===1){drawText('▦  中央揭露  2',rw/2,rh*.51,Math.min(58,rw*.055),'#39ff14','900');drawText('數字＝周圍 8 格的地雷數',rw/2,rh*.70,Math.min(28,rw*.028),'#e8f9fc','700');}
+    else if(step===2){drawText('T.UPTIME  01:24',rw*.28,rh*.52,Math.min(48,rw*.046),'#00ffe5','900');drawText('THREAT  120',rw*.72,rh*.52,Math.min(48,rw*.046),'#ff1744','900');}
+    else{drawText('Ⅱ PAUSE   ▶ RESUME   ■ ABORT   ⏏ STANDBY',rw/2,rh*.54,Math.min(34,rw*.031),'#ffb000','800');}
+    ctx.restore();
+  }
+
+  // Canvas mirror of the SVG DUAL MODE page — same 6.4s timeline so the
+  // standalone preview matches what the projectors show face by face.
+  const MODE_CYCLE_MS = 6400;
+
+  function drawModeCards(rw, rh) {
+    const t = (performance.now() % MODE_CYCLE_MS) / MODE_CYCLE_MS;
+    // Same proportions as the SVG canonical 1408×640 page.
+    const cardW = rw * 0.391, cardH = rh * 0.728, cardY = rh * 0.228;
+    drawModeCard(rw * 0.273 - cardW / 2, cardY, cardW, cardH, {
+      color: '#39ff14', glyph: '◎', title: 'SCAN', zh: '揭露格子',
+      caption: '摸中央格 → 揭露數字', sub: 'CENTER CELL REVEAL',
+      active: t < 0.46,
+      target: t >= 0.06 && t < 0.50,
+      show: t >= 0.14 && t < 0.50 ? 'number' : null,
+    });
+    drawModeCard(rw * 0.727 - cardW / 2, cardY, cardW, cardH, {
+      color: '#ff2d8f', glyph: '⚑', title: 'MARK', zh: '插旗／取消旗子',
+      caption: '摸中央格 → 插旗／再摸取消', sub: 'TOGGLE CENTER FLAG',
+      active: t >= 0.46,
+      target: t >= 0.52 && t < 0.96,
+      show: t >= 0.60 && t < 0.90 ? 'flag' : null,
+    });
+  }
+
+  function drawModeCard(x, y, w, h, o) {
+    ctx.save();
+    ctx.globalAlpha = o.active ? 1 : 0.34;
+    ctx.fillStyle = 'rgba(8,14,22,0.94)';
+    ctx.strokeStyle = o.color;
+    ctx.lineWidth = Math.max(2, w * 0.006);
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeRect(x, y, w, h);
+
+    // Ratios lifted from the measured SVG stack, capped by card width too.
+    const cx = x + w / 2;
+    drawText(o.glyph, cx, y + h * 0.076, Math.min(h * 0.090, w * 0.16), o.color, '900');
+    drawText(o.title, cx, y + h * 0.194, Math.min(h * 0.077, w * 0.20), o.color, '900');
+    drawText(o.zh,    cx, y + h * 0.281, Math.min(h * 0.047, w * 0.13), '#e8f9fc', '700');
+    ctx.strokeStyle = o.color;
+    ctx.lineWidth = Math.max(1, h * 0.004);
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.18, y + h * 0.356);
+    ctx.lineTo(x + w * 0.82, y + h * 0.356);
+    ctx.stroke();
+
+    const cell = Math.min(h * 0.133, w * 0.22);
+    const gx = cx - cell * 1.5, gy = y + h * 0.386;
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+      const center = r === 1 && c === 1;
+      const bx = gx + c * cell, by = gy + r * cell;
+      ctx.globalAlpha = (o.active ? 1 : 0.34) * (center ? 1 : 0.55);
+      ctx.fillStyle = '#07141e';
+      ctx.strokeStyle = o.color;
+      ctx.lineWidth = center ? Math.max(2, cell * 0.05) : Math.max(1, cell * 0.024);
+      ctx.fillRect(bx + 2, by + 2, cell - 6, cell - 6);
+      ctx.strokeRect(bx + 2, by + 2, cell - 6, cell - 6);
+    }
+    ctx.globalAlpha = o.active ? 1 : 0.34;
+    const tx = gx + cell, ty = gy + cell;
+    if (o.target) {
+      ctx.strokeStyle = o.color;
+      ctx.lineWidth = Math.max(3, cell * 0.07);
+      ctx.strokeRect(tx + 1, ty + 1, cell - 4, cell - 4);
+    }
+    if (o.show === 'number') {
+      drawText('2', tx + cell / 2, ty + cell / 2, cell * 0.6, o.color, '900');
+    } else if (o.show === 'flag') {
+      ctx.fillStyle = o.color;
+      ctx.strokeStyle = o.color;
+      ctx.lineWidth = Math.max(2, cell * 0.05);
+      ctx.beginPath();
+      ctx.moveTo(tx + cell * 0.42, ty + cell * 0.22);
+      ctx.lineTo(tx + cell * 0.42, ty + cell * 0.75);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(tx + cell * 0.43, ty + cell * 0.24);
+      ctx.lineTo(tx + cell * 0.78, ty + cell * 0.36);
+      ctx.lineTo(tx + cell * 0.43, ty + cell * 0.49);
+      ctx.closePath();
+      ctx.fill();
+    }
+    drawText(o.caption, cx, y + h * 0.845, Math.min(h * 0.050, w * 0.072), '#e8f9fc', '700');
+    drawText(o.sub, cx, y + h * 0.915, Math.min(h * 0.038, w * 0.055), o.color, '700');
+    ctx.restore();
+  }
+
+  function drawTimeoutOnWalls() {
+    const boardFaces = state.faces.filter(f => f.isBoard);
+    for (const face of boardFaces) {
+      const rotation = hudRotation(face.reservedSide);
+      const readableW = (rotation === 0 || rotation === 180) ? face.width : face.height;
+      const titleSize = Math.min(92, readableW * 0.12);
+      const panelW = readableW * 0.84;
+      const panelH = titleSize * 1.65;
+      ctx.save();
+      ctx.translate(face.originX + face.width / 2, face.originY + face.height / 2);
+      ctx.rotate(rotation * Math.PI / 180);
+      ctx.fillStyle = 'rgba(4,6,12,0.90)';
+      ctx.strokeStyle = '#ff1744';
+      ctx.lineWidth = 4;
+      ctx.shadowColor = '#ff1744';
+      ctx.shadowBlur = 24;
+      ctx.fillRect(-panelW / 2, -panelH / 2, panelW, panelH);
+      ctx.strokeRect(-panelW / 2, -panelH / 2, panelW, panelH);
+      drawText('TIME OUT', 0, -titleSize * 0.12, titleSize, '#ff1744', '900');
+      ctx.shadowBlur = 0;
+      drawText('TIME LIMIT EXCEEDED', 0, titleSize * 0.55,
+               Math.max(16, titleSize * 0.25), '#f4d8de', '700');
+      ctx.restore();
+    }
+  }
+
   function drawFloorOverlay() {
     if (!state) return;
     const floor = state.faces.find(f => f.isFloor);
@@ -400,7 +561,21 @@ export function init() {
     const cyS = floor.originY + floor.height / 2;
 
     if (state.phase === 'idle') {
-      drawCenterButton(cxS, cyS, 'start');
+      drawCenterButton(cxS, cyS, 'play');
+      return;
+    }
+    if (state.phase === 'tutorial') {
+      drawCenterButton(cxS, cyS, 'continue');
+      return;
+    }
+    if (state.phase === 'tutorialReady') {
+      drawCenterButton(cxS, cyS, 'playReady');
+      return;
+    }
+    if (state.phase === 'countdown') {
+      const v=state.countdownValue,color=v===3?'#39ff14':v===2?'#ffb000':'#ff1744';
+      drawText(String(v),cxS,cyS-24,220,color,'900');
+      drawText('GET READY',cxS,cyS+145,44,color,'800');
       return;
     }
 
@@ -438,7 +613,7 @@ export function init() {
   }
 
   function drawCenterButton(cxS, cyS, kind) {
-    // kind: 'start' | 'restart'
+    // kind: 'play' | 'playReady' | 'continue' | 'restart'
     // 物理 3×3 board cells = 75×75 cm = 192 venue px (1 大格 = 25cm = 64px).
     // 現在直接用 venue px 畫,browser CSS 下次 downscale 還是 75×75 cm
     const BTN = (state.restartBtnBoardCells ?? 3) * 64;
@@ -446,10 +621,14 @@ export function init() {
     const flashOn = Math.floor(performance.now() / 400) % 2 === 0;
 
     let color, glow, glyph, label;
-    if (kind === 'start') {
+    if (kind === 'play' || kind === 'playReady') {
       color = flashOn ? '#5dd97c' : '#3a9555';
       glow  = '#5dd97c';
-      glyph = '▶'; label = '開始';
+      glyph = '▶'; label = 'PLAY';
+    } else if (kind === 'continue') {
+      color = flashOn ? '#00ffe5' : '#00a896';
+      glow = '#00ffe5';
+      glyph = '›'; label = 'CONTINUE';
     } else {
       color = state.won ? '#5dd97c' : (flashOn ? '#ff5050' : '#cc3030');
       glow  = state.won ? '#5dd97c' : '#ff5050';
@@ -469,6 +648,11 @@ export function init() {
 
     drawText(glyph, cxS, cyS - BTN * 0.1,  BTN * 0.45, '#fff', '800');
     drawText(label, cxS, cyS + BTN * 0.28, BTN * 0.16, '#fff', '700');
+    if (kind === 'continue') {
+      // 0.42 + half of 0.08 = 0.46 of BTN from centre, inside the 0.5 edge.
+      drawText(`STEP ${(state.tutorialStep ?? 0)+1}/${state.tutorialTotal ?? 4}`,
+               cxS, cyS + BTN*.42, BTN*.08, '#bffcf5', '700');
+    }
   }
 
   function drawText(text, cx, cy, size, color, weight = '600', align = 'center', baseline = 'middle') {
@@ -486,9 +670,19 @@ export function init() {
     const totalBoard = state.cells.length;
     els.revealed.textContent = `${state.revealedCount} / ${totalBoard - state.mineCount}`;
     if (state.phase === 'idle') {
-      els.lockStat.innerHTML = '<b style="color:#5dd97c">▶ 踩地板中央開始</b>';
+      els.lockStat.innerHTML = '<b style="color:#5dd97c">▶ 踩地板中央 PLAY</b>';
+    } else if (state.phase === 'tutorial') {
+      els.lockStat.innerHTML = `<b style="color:#00ffe5">TUTORIAL ${state.tutorialStep + 1}/${state.tutorialTotal} · CONTINUE</b>`;
+    } else if (state.phase === 'tutorialReady') {
+      els.lockStat.innerHTML = '<b style="color:#5dd97c">教學完成 · 踩 PLAY 正式開始</b>';
+    } else if (state.phase === 'countdown') {
+      els.lockStat.innerHTML = `<b style="color:#ffb000">倒數 ${state.countdownValue}</b>`;
     } else if (state.phase === 'gameOver') {
-      els.lockStat.innerHTML = state.won ? '<b style="color:#5dd97c">🎉 過關</b>' : '<b style="color:#ff4040">💥 BOOM</b>';
+      els.lockStat.innerHTML = state.won
+        ? '<b style="color:#5dd97c">🎉 過關</b>'
+        : state.endReason === 'timeout'
+          ? '<b style="color:#ff1744">⏱ TIME OUT</b>'
+          : '<b style="color:#ff4040">遊戲結束</b>';
     } else if (state.lockedCellId != null) {
       const c = state.cells[state.lockedCellId];
       els.lockStat.innerHTML = `已鎖定 <b>${c.faceName}(${c.col},${c.row})</b>`;
@@ -523,6 +717,12 @@ export function init() {
     onModeFeedback: ({ mode, accepted }) => {
       if (!accepted) return;
       floorPulse = { mode, until: Date.now() + 300 };
+    },
+    onTutorial: ({ snapshot }) => {
+      state = snapshot;
+      animStart = 0;
+      maxWaveDist = 0;
+      updateHeader();
     },
     onGameOver: ({ snapshot }) => onGameOver(snapshot),
     onReset: ({ snapshot }) => {

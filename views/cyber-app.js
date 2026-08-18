@@ -60,7 +60,10 @@ function useGameState() {
         if (msg.type === 'snapshot') {
           setState(msg);
         } else if (msg.type === 'game-start' || msg.type === 'game-over' || msg.type === 'reset' ||
-                   msg.type === 'pause' || msg.type === 'resume') {
+                   msg.type === 'pause' || msg.type === 'resume' ||
+                   msg.type === 'tutorial-start' || msg.type === 'tutorial-step' ||
+                   msg.type === 'tutorial-ready' || msg.type === 'tutorial-setting' ||
+                   msg.type === 'countdown-start' || msg.type === 'countdown-tick') {
           setState(msg.snapshot);
         } else if (msg.type === 'mode-change') {
           setState(s => s ? { ...s, currentMode: msg.mode } : s);
@@ -165,11 +168,53 @@ function FreezeOverlay({ state, palette }) {
 // ── Game-end overlay (win / timeout) ─────────────────────
 function GameEndOverlay({ state, palette }) {
   if (!state || state.phase !== 'gameOver') return null;
-  const won = state.won;
-  const reason = state.endReason; // 'win' | 'timeout'
-  const color = won ? palette.accent : palette.danger;
-  const title = won ? '◎ VICTORY' : '⏱ TIME UP';
-  const sub = won ? 'ALL SAFE CELLS REVEALED' : 'TIME LIMIT EXCEEDED';
+
+  // TIME OUT 要像踩雷 freeze 倒數一樣，在每一面牆中央各顯示一次。
+  // 場地玩家只看得到自己面前的牆；如果只在整張展開圖中央放 banner，其他牆面
+  // 只會看到紅波，不知道為什麼結束。依 physical-top 旋轉，確保每面都正向。
+  if (state.endReason === 'timeout') {
+    const boardFaces = (state.faces || []).filter(f => f.isBoard);
+    return (
+      <g pointerEvents="none">
+        {boardFaces.map(face => {
+          const cx = face.originX + face.width / 2;
+          const cy = face.originY + face.height / 2;
+          const rot = faceContentRotation(face.reservedSide);
+          // 窄面也必須放得下完整 TIME OUT；寬度以面向玩家時的可讀寬度為準。
+          const readableW = (rot === 0 || rot === 180) ? face.width : face.height;
+          const titleSize = Math.min(92, readableW * 0.12);
+          const subSize = Math.max(14, Math.min(24, titleSize * 0.27));
+          return (
+            <g key={face.name}
+               transform={`translate(${cx}, ${cy}) rotate(${rot})`}>
+              <rect x={-readableW * 0.44} y={-titleSize * 0.82}
+                width={readableW * 0.88} height={titleSize * 1.72}
+                rx={12} fill="rgba(4,6,12,0.90)"
+                stroke={palette.danger} strokeWidth={3}
+                style={{filter: `drop-shadow(0 0 20px ${palette.danger})`}}/>
+              <text x={0} y={-titleSize * 0.12}
+                textAnchor="middle" dominantBaseline="central"
+                fontFamily="Orbitron" fontSize={titleSize} fontWeight={900}
+                fill={palette.danger} letterSpacing="0.12em"
+                style={{filter: `drop-shadow(0 0 16px ${palette.danger})`}}>
+                TIME OUT
+              </text>
+              <text x={0} y={titleSize * 0.55}
+                textAnchor="middle" dominantBaseline="central"
+                fontFamily="JetBrains Mono" fontSize={subSize} fontWeight={700}
+                fill="rgba(255,255,255,0.82)" letterSpacing="0.16em">
+                TIME LIMIT EXCEEDED
+              </text>
+            </g>
+          );
+        })}
+      </g>
+    );
+  }
+
+  // Win 沿用原本置中的全場 banner。
+  if (!state.won) return null;
+  const color = palette.accent;
   return (
     <g pointerEvents="none">
       <g transform={`translate(${CANVAS_W/2}, ${CANVAS_H/2 - 400})`}>
@@ -180,12 +225,12 @@ function GameEndOverlay({ state, palette }) {
           fontFamily="Orbitron" fontSize={88} fontWeight={900}
           fill={color} letterSpacing="0.28em"
           style={{filter: `drop-shadow(0 0 14px ${color})`}}>
-          {title}
+          ◎ VICTORY
         </text>
         <text x={0} y={50} textAnchor="middle"
           fontFamily="JetBrains Mono" fontSize={28} fontWeight={500}
           fill="rgba(255,255,255,0.7)" letterSpacing="0.25em">
-          {sub}
+          ALL SAFE CELLS REVEALED
         </text>
       </g>
     </g>
@@ -195,6 +240,7 @@ function GameEndOverlay({ state, palette }) {
 // ── Game setup card (time limit; controller only, idle phase) ───
 function GameSetupCard({ state, send, conn }) {
   const tl = state?.timeLimit ?? { enabled: false, ms: 600_000 };
+  const tutorialEnabled = state?.tutorialEnabled ?? true;
   const totalSec = Math.max(0, Math.floor((tl.ms || 0) / 1000));
   const initH = Math.floor(totalSec / 3600);
   const initM = Math.floor((totalSec % 3600) / 60);
@@ -220,6 +266,11 @@ function GameSetupCard({ state, send, conn }) {
   return (
     <div className="setup-card">
       <h3>// GAME SETUP</h3>
+      <label className="setup-check">
+        <input type="checkbox" checked={tutorialEnabled} disabled={!isIdle}
+          onChange={e => send({ type: 'set-tutorial-enabled', enabled: e.target.checked })}/>
+        <span>每局播放教學</span>
+      </label>
       <label className="setup-check">
         <input type="checkbox" checked={enabled} disabled={!isIdle}
           onChange={e => setEnabled(e.target.checked)}/>
@@ -351,6 +402,9 @@ function App() {
   // cyber view state for FloorTerminal / RedWave overlay
   const cyberState = !state ? 'idle'
     : state.phase === 'idle' ? 'idle'
+    : state.phase === 'tutorial' ? 'tutorial'
+    : state.phase === 'tutorialReady' ? 'tutorialReady'
+    : state.phase === 'countdown' ? 'countdown'
     : state.phase === 'playing' ? 'playing'
     : state.phase === 'paused' ? 'paused'
     : state.phase === 'gameOver' ? (showRestart ? 'gameover-final' : 'gameover-wave')
@@ -410,6 +464,10 @@ function App() {
   const totalSafe = state.cells.length - state.mineCount;
   const flaggedCount = state.flaggedCount ?? 0;
   const revealedCount = state.revealedCount ?? 0;
+  // Tutorial/ready are standalone presentation stages, not overlays on the real
+  // mine board. Do not even mount cells/HUD during these phases, so no board
+  // details can bleed through via alpha, scaling letterbox, or future CSS changes.
+  const isTutorialStage = state.phase === 'tutorial' || state.phase === 'tutorialReady' || state.phase === 'countdown';
 
   return (
     <div className={`stage ${tw.scanlines ? 'scan' : ''}`}>
@@ -432,11 +490,14 @@ function App() {
                 <FloorGrid face={face} palette={palette}/>
                 <FloorTerminal face={face} palette={palette}
                   state={cyberState}
-                  currentMode={state.currentMode}/>
+                  currentMode={state.currentMode}
+                  tutorialStep={state.tutorialStep ?? 0}
+                  tutorialTotal={state.tutorialTotal ?? 4}
+                  countdownValue={state.countdownValue}/>
               </>
             )}
 
-            {face.isBoard && (
+            {face.isBoard && !isTutorialStage && (
               <>
                 {(cellsByFace[face.name] || []).map(cell => {
                   const rot = faceContentRotation(face.reservedSide);
@@ -477,6 +538,9 @@ function App() {
             )}
           </g>
         ))}
+
+        {/* Four synchronized pre-game tutorial pages cover the four main walls. */}
+        <TutorialWallOverlay state={state} faces={faces} palette={palette}/>
 
         {cyberState === 'paused' && (() => {
           const floor = faces.find(f => f.isFloor);

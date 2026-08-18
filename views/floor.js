@@ -51,7 +51,22 @@ export function init() {
     if (!state || !face) return;
 
     if (state.phase === 'idle') {
-      drawCenterButtonFullscreen(W, H, 'start');
+      drawCenterButtonFullscreen(W, H, 'play');
+      return;
+    }
+
+    if (state.phase === 'tutorial') {
+      drawCenterButtonFullscreen(W, H, 'continue');
+      return;
+    }
+
+    if (state.phase === 'tutorialReady') {
+      drawCenterButtonFullscreen(W, H, 'playReady');
+      return;
+    }
+
+    if (state.phase === 'countdown') {
+      drawCountdownFloor(W, H, state.countdownValue);
       return;
     }
 
@@ -111,13 +126,48 @@ export function init() {
       ctx.fillRect(0, 0, W, H);
     }
 
-    if (showButton) {
+    if (state.endReason === 'timeout') {
+      drawTimeoutFloor(W, H, showButton);
+    } else if (showButton) {
       drawCenterButtonFullscreen(W, H, 'restart');
     } else {
-      drawText(state.won ? '🎉 過關' : '💥 BOOM',
+      drawText(state.won ? '🎉 過關' : '遊戲結束',
                W / 2, H / 2,
                Math.min(W * 0.1, H * 0.15),
                state.won ? '#5dd97c' : '#ff4040', '800');
+    }
+  }
+
+  function drawCountdownFloor(W, H, value) {
+    const color=value===3?'#39ff14':value===2?'#ffb000':'#ff1744';
+    ctx.fillStyle='#02040a';ctx.fillRect(0,0,W,H);
+    drawText(String(value),W/2,H*.48,Math.min(W*.28,H*.24),color,'900');
+    drawText('GET READY',W/2,H*.67,Math.min(W*.065,64),color,'800');
+  }
+
+  function drawTimeoutFloor(W, H, showButton) {
+    const titleSize = Math.min(W * 0.13, H * 0.10);
+    const panelW = W * 0.82;
+    const panelH = titleSize * 1.75;
+    ctx.save();
+    ctx.fillStyle = 'rgba(4,6,12,0.90)';
+    ctx.strokeStyle = '#ff1744';
+    ctx.lineWidth = Math.max(4, W * 0.004);
+    ctx.shadowColor = '#ff1744';
+    ctx.shadowBlur = Math.max(20, titleSize * 0.22);
+    ctx.fillRect((W - panelW) / 2, H / 2 - panelH / 2, panelW, panelH);
+    ctx.strokeRect((W - panelW) / 2, H / 2 - panelH / 2, panelW, panelH);
+    drawText('TIME OUT', W / 2, H / 2 - titleSize * 0.12,
+             titleSize, '#ff1744', '900');
+    ctx.shadowBlur = 0;
+    drawText('TIME LIMIT EXCEEDED', W / 2, H / 2 + titleSize * 0.58,
+             Math.max(24, titleSize * 0.27), '#f4d8de', '700');
+    ctx.restore();
+
+    // 波結束後在下方補充返回待機提示；主標題保持，不會被按鈕蓋掉。
+    if (showButton) {
+      drawText('踩中央返回待機', W / 2, H * 0.72,
+               Math.min(W * 0.045, 52), '#ffffff', '700');
     }
   }
 
@@ -133,9 +183,12 @@ export function init() {
     const by = H / 2 - btnSize / 2;
     const flashOn = Math.floor(performance.now() / 400) % 2 === 0;
     let color, glyph, label;
-    if (kind === 'start') {
+    if (kind === 'play' || kind === 'playReady') {
       color = flashOn ? '#5dd97c' : '#3a9555';
-      glyph = '▶'; label = '開始遊戲';
+      glyph = '▶'; label = 'PLAY';
+    } else if (kind === 'continue') {
+      color = flashOn ? '#00ffe5' : '#00a896';
+      glyph = '›'; label = 'CONTINUE';
     } else {
       color = state.won ? '#5dd97c' : (flashOn ? '#ff5050' : '#cc3030');
       glyph = '↻'; label = '重新開始';
@@ -147,6 +200,15 @@ export function init() {
     ctx.strokeRect(bx + 2, by + 2, btnSize - 4, btnSize - 4);
     drawText(glyph, W / 2, H / 2 - btnSize * 0.1, btnSize * 0.45, '#fff', '800');
     drawText(label, W / 2, H / 2 + btnSize * 0.28, btnSize * 0.13, '#fff', '700');
+    // Sublabel centre must stay inside the button face: 0.42 + half of 0.075 is
+    // 0.4575 of btnSize from centre, clear of the 0.5 edge.
+    if (kind === 'continue') {
+      drawText(`STEP ${(state.tutorialStep ?? 0) + 1} / ${state.tutorialTotal ?? 4}`,
+               W / 2, H / 2 + btnSize * 0.42, btnSize * 0.075, '#bffcf5', '700');
+    } else if (kind === 'playReady') {
+      drawText('開始正式遊戲', W / 2, H / 2 + btnSize * 0.42,
+               btnSize * 0.075, '#dfffea', '700');
+    }
   }
 
   function drawText(text, cx, cy, size, color, weight = '600', align = 'center', baseline = 'middle') {
@@ -167,6 +229,11 @@ export function init() {
     onModeFeedback: ({ mode, accepted }) => {
       if (!accepted) return;
       floorPulse = { mode, until: Date.now() + 300 };
+    },
+    onTutorial: ({ snapshot }) => {
+      state = snapshot;
+      indexFace();
+      animStart = 0;
     },
     onGameOver: ({ snapshot }) => {
       state = snapshot;
