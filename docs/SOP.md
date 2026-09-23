@@ -24,9 +24,20 @@
    [TouchService] connected
    [TouchService] hello, venue=704, canvas=2688x3840
    [minesweeper] http://localhost:3000/
-   [minesweeper] board: 1000 cells, 150 mines
+   [minesweeper] board: 800 cells, 120 mines
    ```
-3. 開 WallProjector,管理頁 `http://127.0.0.1:20121/` 按「還原全部 enabled」— 6 個牆面跟地板會同時投影起來
+3. 開控制台 `http://localhost:3000/?face=all`,確認場地與投影準備完成後，在右側 `GAME SETUP` 按 `開始遊戲 · START GAME`。畫面會先進入等待玩家觸發的 `armed` 狀態;玩家按下 `Wall Left` 地雷造型按鈕後才播放約 5 秒前導。
+4. 開 WallProjector,管理頁 `http://127.0.0.1:20121/` 按「還原全部 enabled」— 6 個牆面跟地板會同時投影起來
+
+## 每局流程
+
+1. 外部待機時，玩家踩地板或摸牆都不會啟動遊戲;待機畫面維持純色背景與粒子。
+2. 工作人員在控制台按 `開始遊戲`,場域進入 `armed`;此時只有 `Wall Left` 地雷按鈕有效，計時器與地雷數 HUD 不顯示。
+3. 玩家按下 `Wall Left` 地雷按鈕後才播放前導動畫。
+4. 前導完成後，玩家踩地板中央 `PLAY` 才進入教學／倒數／遊戲。
+5. 遊戲中可使用 `PAUSE`;暫停只鎖定操作，時間照常計算，不提供 `ABORT`。
+6. 超時後等待紅色波紋完成，玩家踩中央 `CONTINUE` 才進入結尾動畫。
+7. 過關或超時結尾完成後，玩家踩中央 `RETURN` 回到外部待機。
 
 ## 旋轉校正
 

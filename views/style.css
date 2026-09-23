@@ -119,3 +119,4 @@ canvas { display: block; width: 100vw; height: 100vh; }
 .overlay b { color: var(--text); }
 .overlay.gameover { color: var(--mine); font-size: 4vh; }
 .overlay.win { color: var(--win); font-size: 4vh; }
+.overlay.idle-overlay { display: none; }

@@ -164,18 +164,21 @@ function HUDContent({ w, h, face, palette, mineCount, flaggedCount, revealedCoun
 }
 
 // Floor button geometry — 內 SCAN 圓 + 外 MARK 環(donut),四面牆都好踩到
-// PAUSE 還是放在原本 chip rows 104..115 的方塊。
+// PAUSE 放在 chip rows 84..95，靠近中央但與 MARK 環保留間距。
 // 跟 server/game.js 的 SCAN_R / MARK_R / PAUSE box 一致。
 const SCAN_INNER_R   = 210;   // scan 範圍拉大
 const MARK_OUTER_R   = 290;   // mark 環變薄(80 venue px)
-const FLOOR_PAUSE_Y  = 1664;
+const FLOOR_PAUSE_Y  = 1344;
 const FLOOR_BTN      = 192;
 
 function FloorTerminal({ face, palette, state, currentMode, tutorialStep=0, tutorialTotal=4, countdownValue=null }) {
   const cx = face.w / 2;
   const cy = face.h / 2;
 
-  if (state === "idle") {
+  // External standby is intentionally inert. The operator-triggered intro
+  // transitions to ready, where the original floor PLAY gate reappears.
+  if (state === "idle" || state === "intro") return null;
+  if (state === "ready") {
     return <CenterButton kind="play" cx={cx} cy={cy} r={SCAN_INNER_R} palette={palette}/>;
   }
   if (state === "tutorial") {
@@ -189,8 +192,10 @@ function FloorTerminal({ face, palette, state, currentMode, tutorialStep=0, tuto
     return <CountdownFloor cx={cx} cy={cy} palette={palette} value={countdownValue}/>;
   }
   if (state === "gameover-final") {
-    return <CenterButton kind="endGame" cx={cx} cy={cy} r={SCAN_INNER_R} palette={palette}/>;
+    return null;
   }
+  if (state === "gameover-continue") return null;
+  if (state === "gameover-wave" || state === "gameover-timeout-ending") return null;
   if (state === "gameover-wave") return null;
   if (state === "paused") {
     // PausedControls 在 cyber-app.js 統一 render 在 mask 上面
@@ -392,7 +397,7 @@ function PausedControls({ face, palette }) {
   const cy = face.h / 2;
   return (
     <g>
-      {/* PAUSED banner 在 donut 上方 */}
+      {/* PAUSED banner 在單一 RESUME 操作上方 */}
       <g transform={`translate(${cx}, ${cy - MARK_OUTER_R - 60})`}>
         <text x={0} y={0} textAnchor="middle"
           fontFamily="Orbitron" fontSize={56} fontWeight={900}
@@ -407,29 +412,37 @@ function PausedControls({ face, palette }) {
         </text>
       </g>
 
-      {/* 同 donut 結構:內圈 RESUME / 外環 ABORT;兩邊都亮表示「二選一」 */}
-      <FloorDonut cx={cx} cy={cy} innerR={SCAN_INNER_R} outerR={MARK_OUTER_R}
-        innerColor={palette.accent} innerGlyph="▶" innerLabel="RESUME" innerSub="繼續遊戲"
-        outerColor={palette.danger} outerGlyph="◼" outerLabel="ABORT" outerSub="結束 · 回到待機"
-        mode="both"/>
+      {/* 企畫書移除 ABORT；暫停畫面只留下中央 RESUME */}
+      <CenterButton kind="resume" cx={cx} cy={cy} r={SCAN_INNER_R} palette={palette}/>
     </g>
   );
 }
 
 // TerminalButton 已由 FloorDonut 取代
 
-// CenterButton — 跟 donut 統一視覺風格,在 idle / gameOver 顯示成一個圓圈
+// CenterButton — 跟 donut 統一視覺風格,在 ready / gameOver 顯示成一個圓圈
 // (跟 playing 的 inner SCAN 圓同位置同半徑,讓動作位置在所有 phase 都一致)
 function CenterButton({ kind, cx, cy, r, palette, progress=null }) {
   const isPlay = kind === "play" || kind === "playReady";
   const isContinue = kind === "continue";
-  const accent = (isPlay || isContinue) ? (isContinue ? palette.primary : palette.accent) : palette.danger;
-  const glyph = isContinue ? "›" : isPlay ? "▶" : (kind === "endGame" ? "⏏" : "↻");
-  const label = isContinue ? "CONTINUE"
+  const isContinueEnd = kind === "continueEnd";
+  const isResume = kind === "resume";
+  const timeoutBlue = "#2F80FF";
+  const timeoutBlueGlow = "#66B5FF";
+  const accent = (isPlay || isContinue || isResume)
+    ? (isContinue ? palette.primary : palette.accent)
+    : (isContinueEnd ? timeoutBlue : palette.danger);
+  const glyph = isContinue || isContinueEnd ? "›"
+              : isResume || isPlay ? "▶"
+              : (kind === "endGame" ? "⏏" : "↻");
+  const label = isContinue || isContinueEnd ? "CONTINUE"
+              : isResume ? "RESUME"
               : isPlay ? "PLAY"
               : kind === "endGame" ? "RETURN.STANDBY"
               : "EXECUTE.RESET";
   const sub   = isContinue ? `STEP ${progress}`
+              : isContinueEnd ? "進入結尾動畫"
+              : isResume ? "繼續遊戲"
               : kind === "playReady" ? "開始正式遊戲"
               : kind === "play" ? "踩入觀看教學"
               : kind === "endGame" ? "結束 · 回到待機"
@@ -449,7 +462,7 @@ function CenterButton({ kind, cx, cy, r, palette, progress=null }) {
         fill={accent} fillOpacity={0.22}
         stroke={accent} strokeWidth={4}
         className="pulse-slow"
-        style={{filter: `drop-shadow(0 0 18px ${accent})`}}/>
+        style={{filter: `drop-shadow(0 0 18px ${isContinueEnd ? timeoutBlueGlow : accent})`}}/>
 
       {/* 內部 sub-grid 紋理 */}
       <g opacity={0.18} stroke={accent} strokeWidth={1}>
@@ -472,11 +485,12 @@ function CenterButton({ kind, cx, cy, r, palette, progress=null }) {
       </text>
       <text x={cx} y={cy + r * 0.42 + 22} textAnchor="middle"
         fontFamily="JetBrains Mono" fontSize={13}
-        fill="rgba(143,168,184,0.7)" letterSpacing="0.15em">
+        fill={isContinueEnd ? timeoutBlueGlow : "rgba(143,168,184,0.7)"}
+        letterSpacing="0.15em">
         {sub}
       </text>
     </g>
   );
 }
 
-Object.assign(window, { FaceHUD, FloorTerminal, PausedControls });
+Object.assign(window, { FaceHUD, FloorTerminal, PausedControls, CenterButton });

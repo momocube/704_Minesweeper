@@ -13,8 +13,7 @@ import {
 //
 // SCAN_R          inner circle radius (also used for CENTER start/reset
 //                 button and paused RESUME slot)
-// MARK_R          outer ring outer radius (paused ABORT slot uses the
-//                 same ring)
+// MARK_R          outer ring outer radius
 const FLOOR_CHIP_W = 32;    // chip width  in venue px (Floor orientation)
 const FLOOR_CHIP_H = 16;    // chip height in venue px
 const FLOOR_W      = 1408;  // Floor face width   in venue px
@@ -22,18 +21,37 @@ const FLOOR_H      = 2048;  // Floor face height  in venue px
 const FLOOR_CX     = FLOOR_W / 2;  // 704
 const FLOOR_CY     = FLOOR_H / 2;  // 1024
 const SCAN_R       = 210;   // inner SCAN circle (also CENTER start/reset, paused RESUME)
-const MARK_R       = 290;   // outer MARK ring  (also paused ABORT) — ring width 80
+const MARK_R       = 290;   // outer MARK ring — ring width 80
 
-// Pause button — separate square box, well clear of the donut
+// Pause button — separate square box, moved closer to the donut while keeping
+// a clear gap below the MARK ring.
 const PAUSE_COL_MIN = 19, PAUSE_COL_MAX = 25;
-const PAUSE_ROW_MIN = 104, PAUSE_ROW_MAX = 116;
+const PAUSE_ROW_MIN = 84, PAUSE_ROW_MAX = 96;
 
 // Mine freeze: how long input is blocked after stepping on a mine.
 const MINE_FREEZE_MS = 5000;
 const START_COUNTDOWN_SECONDS = 3;
+const INTRO_DURATION_MS = 10000;
+const OPERATOR_TRANSITION_MS = 4000;
+const TUTORIAL_TRANSITION_MS = 6000;
+const RED_WAVE_DURATION_MS = 1800;
+const ENDING_SETTLE_MS = 400;
+const WIN_ENDING_DURATION_MS = 6200;
+const TIMEOUT_ENDING_DURATION_MS = 6200;
 
 // 3 board cells × 3 board cells — legacy snapshot field for older views.
 const RESTART_BTN_BOARD_CELLS = 3;
+
+// The original venue flow uses a physical mine-shaped trigger on Wall Left.
+// Keep its position in board-cell units so every view can render and hit-test
+// the same button without inventing a separate coordinate system.
+const WALL_LEFT_MINE_BUTTON = {
+  faceName: 'Wall Left',
+  col: 4,
+  row: 15,
+  cols: 3,
+  rows: 3,
+};
 
 function chipCenterPx(sensorCol, sensorRow) {
   return [sensorCol * FLOOR_CHIP_W + FLOOR_CHIP_W / 2,
@@ -51,9 +69,9 @@ function inPauseBox(col, row) {
 }
 
 const FLOOR_BUTTONS = {
-  // inner circle — START / RESET (idle, gameOver), SCAN (playing), RESUME (paused)
+  // inner circle — PLAY/RESET (ready, gameOver), SCAN (playing), RESUME (paused)
   center: { x: FLOOR_CX, y: FLOOR_CY, r: SCAN_R },
-  // outer ring — MARK (playing), ABORT (paused)
+  // outer ring — MARK (playing)
   outer:  { x: FLOOR_CX, y: FLOOR_CY, rIn: SCAN_R, rOut: MARK_R },
   // pause — square box, playing only
   pause:  { colMin: PAUSE_COL_MIN, colMax: PAUSE_COL_MAX, rowMin: PAUSE_ROW_MIN, rowMax: PAUSE_ROW_MAX },
@@ -65,6 +83,7 @@ export class Game {
     this.topology = topology;
     this.options = options;
     this.listeners = new Set();
+    this._idleEchoSeq = 0;
     // Operator settings persist across game resets (configure once, reuse for rounds).
     this.timeLimit = { enabled: false, ms: 10 * 60 * 1000 };
     // Tutorial is enabled by default. When enabled, PLAY enters a four-step tutorial;
@@ -74,7 +93,12 @@ export class Game {
   }
 
   on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
-  _emit(msg) { for (const fn of this.listeners) fn(msg); }
+  _emit(msg) {
+    const withClock = msg.serverNowMs == null
+      ? { ...msg, serverNowMs: Date.now() }
+      : msg;
+    for (const fn of this.listeners) fn(withClock);
+  }
 
   _reset() {
     const built = buildBoard(this.venue, this.topology, this.options);
@@ -82,35 +106,116 @@ export class Game {
     this.faceMap = built.faceMap;
     this.mineCount = built.mineCount;
     this.total = built.total;
-    this.phase = 'idle';        // 'idle' | 'tutorial' | 'tutorialReady' | 'countdown' | 'playing' | 'paused' | 'gameOver'
+    const wallLeft = this.venue.faces.find(f => f.name === 'Wall Left');
+    const floor = this.venue.faces.find(f => f.name === FLOOR_FACE_NAME);
+    const wallLeftSize = wallLeft ? faceCanvasSize(wallLeft) : this.venue.canvas;
+    const floorSize = floor ? faceCanvasSize(floor) : this.venue.canvas;
+    this.startButton = wallLeft ? this._buildStartButton(wallLeft, wallLeftSize) : null;
+    this.animationOrigins = {
+      intro: this.startButton ? {
+        faceName: this.startButton.faceName,
+        x: this.startButton.x,
+        y: this.startButton.y,
+      } : {
+        faceName: null,
+        x: this.venue.canvas.width / 2,
+        y: this.venue.canvas.height / 2,
+      },
+      timeout: floor ? {
+        faceName: floor.name,
+        x: floor.originX + floorSize.width / 2,
+        y: floor.originY + floorSize.height / 2,
+      } : {
+        faceName: null,
+        x: this.venue.canvas.width / 2,
+        y: this.venue.canvas.height / 2,
+      },
+    };
+    this.phase = 'idle';        // 'idle' | 'armed' | 'intro' | 'ready' | 'tutorial' | 'tutorialReady' | 'countdown' | 'playing' | 'paused' | 'gameOver'
     this.tutorialStep = null;   // 0..3 only while phase === 'tutorial'
     this.countdownValue = null; // 3..1 only while phase === 'countdown'
+    this.introStartedAt = null;
+    this.introDurationMs = Math.max(1, Number(this.options.introDurationMs) || INTRO_DURATION_MS);
+    this.operatorTransitionStartedAt = null;
+    this.operatorTransitionDurationMs = Math.max(
+      1, Number(this.options.operatorTransitionDurationMs) || OPERATOR_TRANSITION_MS,
+    );
+    this.tutorialTransitionStartedAt = null;
+    this.tutorialTransitionDurationMs = Math.max(
+      1, Number(this.options.tutorialTransitionDurationMs) || TUTORIAL_TRANSITION_MS,
+    );
     this.gameOver = false;
     this.won = false;
-    this.endReason = null;      // 'win' | 'timeout' | null
+    this.endReason = null;      // 'win' | 'timeout' | 'operator' | null
     this.revealedCount = 0;
+    this.lastRevealCellId = null;
     this.gameStartMs = null;
     this.gameEndMs = null;
+    this.endingStartedAt = null;
+    this.endActionAt = null;
+    this.endStage = null;       // 'win-ending' | 'timeout-wave' | 'timeout-ending' | 'operator-ending' | null
     this.pausedAt = null;
     this.bombCellId = null;     // last mine stepped on (for UI highlight)
     this.redWave = null;
+    this.redWaveStartedAt = null;
     this.freezeUntil = null;    // timestamp; input is blocked when Date.now() < freezeUntil
     this.currentMode = 'reveal';
     this._timeLimitTimer = null;
     this._timeLimitRemaining = null;
     this._freezeTimer = null;
     this._countdownTimer = null;
+    this._introTimer = null;
+    this._operatorTransitionTimer = null;
+    this._tutorialTransitionTimer = null;
+  }
+
+  _buildStartButton(face, size) {
+    const boardCols = Math.max(1, Math.floor(face.colCount / SENSOR_PER_CELL_X));
+    const boardRows = Math.max(1, Math.floor(face.rowCount / SENSOR_PER_CELL_Y));
+    const cols = Math.min(WALL_LEFT_MINE_BUTTON.cols, boardCols);
+    const rows = Math.min(WALL_LEFT_MINE_BUTTON.rows, boardRows);
+    const col = Math.min(WALL_LEFT_MINE_BUTTON.col, boardCols - cols);
+    const row = Math.min(WALL_LEFT_MINE_BUTTON.row, boardRows - rows);
+    const cellW = size.width / boardCols;
+    const cellH = size.height / boardRows;
+    return {
+      faceName: face.name,
+      boardCol: col,
+      boardRow: row,
+      boardCols: cols,
+      boardRows: rows,
+      x: face.originX + (col + cols / 2) * cellW,
+      y: face.originY + (row + rows / 2) * cellH,
+      width: cols * cellW,
+      height: rows * cellH,
+      sensorColMin: col * SENSOR_PER_CELL_X,
+      sensorColMax: (col + cols) * SENSOR_PER_CELL_X,
+      sensorRowMin: row * SENSOR_PER_CELL_Y,
+      sensorRowMax: (row + rows) * SENSOR_PER_CELL_Y,
+    };
   }
 
   _clearTimers() {
     if (this._timeLimitTimer) { clearTimeout(this._timeLimitTimer); this._timeLimitTimer = null; }
     if (this._freezeTimer)    { clearTimeout(this._freezeTimer);    this._freezeTimer = null; }
     if (this._countdownTimer) { clearTimeout(this._countdownTimer); this._countdownTimer = null; }
+    if (this._introTimer)     { clearTimeout(this._introTimer);     this._introTimer = null; }
+    if (this._operatorTransitionTimer) {
+      clearTimeout(this._operatorTransitionTimer);
+      this._operatorTransitionTimer = null;
+    }
+    if (this._tutorialTransitionTimer) {
+      clearTimeout(this._tutorialTransitionTimer);
+      this._tutorialTransitionTimer = null;
+    }
   }
 
   setTimeLimit({ enabled, ms }) {
     const e = !!enabled;
-    const m = Math.max(1, Math.floor(Number(ms) || 0));
+    const numericMs = Number(ms);
+    const m = Number.isFinite(numericMs)
+      ? Math.max(1, Math.floor(numericMs))
+      : 1;
     this.timeLimit = { enabled: e, ms: m };
     this._emit({ type: 'time-limit', timeLimit: this.timeLimit });
   }
@@ -126,11 +231,101 @@ export class Game {
     return true;
   }
 
+  // The operator arms the venue first. The player must then press the physical
+  // Wall Left mine button before the presentation intro is allowed to start.
+  startFromOperator() {
+    if (this.phase !== 'idle') return false;
+    this._clearTimers();
+    this.phase = 'armed';
+    this.operatorTransitionStartedAt = Date.now();
+    const startedAt = this.operatorTransitionStartedAt;
+    this._operatorTransitionTimer = setTimeout(() => {
+      if (this.phase !== 'armed' || this.operatorTransitionStartedAt !== startedAt) return;
+      this._operatorTransitionTimer = null;
+      this.operatorTransitionStartedAt = null;
+      this._emit({ type: 'operator-transition-complete', snapshot: this.snapshot() });
+    }, this.operatorTransitionDurationMs);
+    this._emit({ type: 'armed', snapshot: this.snapshot() });
+    return true;
+  }
+
+  // Test/operator helper for deterministic input assertions without waiting
+  // for the short post-start gradient transition.
+  _completeOperatorTransition() {
+    if (this.phase !== 'armed' || this.operatorTransitionStartedAt == null) return false;
+    if (this._operatorTransitionTimer) {
+      clearTimeout(this._operatorTransitionTimer);
+      this._operatorTransitionTimer = null;
+    }
+    this.operatorTransitionStartedAt = null;
+    return true;
+  }
+
+  _startIntro() {
+    this._clearTimers();
+    this.phase = 'intro';
+    this.introStartedAt = Date.now();
+    this.gameStartMs = null;
+    this.gameEndMs = null;
+    this.operatorTransitionStartedAt = null;
+    this.tutorialTransitionStartedAt = null;
+    this.endingStartedAt = null;
+    this.endActionAt = null;
+    this.endStage = null;
+    this.tutorialStep = null;
+    this.countdownValue = null;
+    const introStartedAt = this.introStartedAt;
+    this._introTimer = setTimeout(() => {
+      if (this.phase !== 'intro' || this.introStartedAt !== introStartedAt) return;
+      this._introTimer = null;
+      this.phase = 'ready';
+      this.introStartedAt = null;
+      this._emit({ type: 'intro-complete', snapshot: this.snapshot() });
+    }, this.introDurationMs);
+  }
+
+  // Test/operator helper for deterministic transitions without waiting for the
+  // ten-second presentation animation.
+  _completeIntro() {
+    if (this.phase !== 'intro') return false;
+    if (this._introTimer) {
+      clearTimeout(this._introTimer);
+      this._introTimer = null;
+    }
+    this.phase = 'ready';
+    this.introStartedAt = null;
+    this.endingStartedAt = null;
+    this.endActionAt = null;
+    this.endStage = null;
+    this._emit({ type: 'intro-complete', snapshot: this.snapshot() });
+    return true;
+  }
+
   _startTutorial() {
     this.phase = 'tutorial';
     this.tutorialStep = 0;
     this.gameStartMs = null;
     this.gameEndMs = null;
+    this.tutorialTransitionStartedAt = Date.now();
+    const startedAt = this.tutorialTransitionStartedAt;
+    this._tutorialTransitionTimer = setTimeout(() => {
+      if (this.phase !== 'tutorial' || this.tutorialTransitionStartedAt !== startedAt) return;
+      this._tutorialTransitionTimer = null;
+      this.tutorialTransitionStartedAt = null;
+      this._emit({ type: 'tutorial-transition-complete', snapshot: this.snapshot() });
+    }, this.tutorialTransitionDurationMs);
+  }
+
+  // Test/operator helper for deterministic tutorial assertions without waiting
+  // for the visual transition to finish.
+  _completeTutorialTransition() {
+    if (this.phase !== 'tutorial' || this.tutorialTransitionStartedAt == null) return false;
+    if (this._tutorialTransitionTimer) {
+      clearTimeout(this._tutorialTransitionTimer);
+      this._tutorialTransitionTimer = null;
+    }
+    this.tutorialTransitionStartedAt = null;
+    return true;
   }
 
   _advanceTutorial() {
@@ -152,6 +347,9 @@ export class Game {
     this.countdownValue = START_COUNTDOWN_SECONDS;
     this.gameStartMs = null;
     this.gameEndMs = null;
+    this.endingStartedAt = null;
+    this.endActionAt = null;
+    this.endStage = null;
     this._emit({ type: 'countdown-start', snapshot: this.snapshot() });
 
     const intervalMs = Math.max(1, Number(this.options.countdownIntervalMs) || 1000);
@@ -181,6 +379,9 @@ export class Game {
     this.endReason = null;
     this.gameStartMs = Date.now();
     this.gameEndMs = null;
+    this.endingStartedAt = null;
+    this.endActionAt = null;
+    this.endStage = null;
     this.pausedAt = null;
     this.freezeUntil = null;
     this._timeLimitRemaining = null;
@@ -191,30 +392,14 @@ export class Game {
 
   _pauseGame() {
     if (this.phase !== 'playing') return;
-    // freeze during pause clears (operator chose to pause anyway)
-    if (this._freezeTimer) { clearTimeout(this._freezeTimer); this._freezeTimer = null; }
-    this.freezeUntil = null;
     this.phase = 'paused';
     this.pausedAt = Date.now();
-    // Stash remaining time so resume can re-arm
-    if (this._timeLimitTimer) {
-      const elapsed = this.pausedAt - this.gameStartMs;
-      this._timeLimitRemaining = Math.max(0, this.timeLimit.ms - elapsed);
-      clearTimeout(this._timeLimitTimer);
-      this._timeLimitTimer = null;
-    }
   }
 
   _resumeGame() {
     if (this.phase !== 'paused') return;
-    const pausedDuration = Date.now() - this.pausedAt;
-    this.gameStartMs += pausedDuration;
     this.pausedAt = null;
     this.phase = 'playing';
-    if (this.timeLimit.enabled && this._timeLimitRemaining != null) {
-      this._timeLimitTimer = setTimeout(() => this._handleTimeout(), this._timeLimitRemaining);
-      this._timeLimitRemaining = null;
-    }
   }
 
   snapshot() {
@@ -230,8 +415,15 @@ export class Game {
       tutorialStep: this.tutorialStep,
       tutorialTotal: 4,
       countdownValue: this.countdownValue,
+      introStartedAt: this.introStartedAt,
+      introDurationMs: this.introDurationMs,
+      operatorTransitionStartedAt: this.operatorTransitionStartedAt,
+      operatorTransitionDurationMs: this.operatorTransitionDurationMs,
+      tutorialTransitionStartedAt: this.tutorialTransitionStartedAt,
+      tutorialTransitionDurationMs: this.tutorialTransitionDurationMs,
       currentMode: this.currentMode,
       floorButtons: FLOOR_BUTTONS,
+      startButton: this.startButton,
       faces: allFaceNames.map(name => {
         const f = this.venue.faces.find(x => x.name === name);
         if (!f) return null;
@@ -262,9 +454,25 @@ export class Game {
       endReason: this.endReason,
       gameStartMs: this.gameStartMs,
       gameEndMs: this.gameEndMs,
+      endingStartedAt: this.endingStartedAt,
+      endActionAt: this.endActionAt,
+      endStage: this.endStage,
+      animationOrigins: this.animationOrigins,
+      serverNowMs: Date.now(),
+      lastRevealCellId: this.lastRevealCellId,
       pausedAt: this.pausedAt,
       freezeUntil: this.freezeUntil,
       freezeDurationMs: MINE_FREEZE_MS,
+      redWaveStartedAt: this.redWaveStartedAt,
+      animationDurations: {
+        intro: this.introDurationMs,
+        operatorTransition: this.operatorTransitionDurationMs,
+        tutorialTransition: this.tutorialTransitionDurationMs,
+        redWave: RED_WAVE_DURATION_MS,
+        endingSettle: ENDING_SETTLE_MS,
+        winEnding: WIN_ENDING_DURATION_MS,
+        timeoutEnding: TIMEOUT_ENDING_DURATION_MS,
+      },
       timeLimit: this.timeLimit,
       pauseBtnRows: { min: PAUSE_ROW_MIN, max: PAUSE_ROW_MAX }, // legacy
       bombCellId: this.bombCellId,
@@ -307,14 +515,75 @@ export class Game {
     return d > SCAN_R && d <= MARK_R;
   }
 
-  handleTouch(faceName, sensorCol, sensorRow) {
+  _inStartButton(faceName, sensorCol, sensorRow) {
+    const b = this.startButton;
+    return !!b &&
+      faceName === b.faceName &&
+      sensorCol >= b.sensorColMin && sensorCol < b.sensorColMax &&
+      sensorRow >= b.sensorRowMin && sensorRow < b.sensorRowMax;
+  }
+
+  _emitIdleEcho(faceName, sensorCol, sensorRow, clientEchoId = null) {
+    const face = this.venue.faces.find(f => f.name === faceName);
+    if (!face) return;
+
+    const col = Math.floor(Number(sensorCol) / SENSOR_PER_CELL_X);
+    const row = Math.floor(Number(sensorRow) / SENSOR_PER_CELL_Y);
+    const cols = Math.max(1, Math.floor(face.colCount / SENSOR_PER_CELL_X));
+    const rows = Math.max(1, Math.floor(face.rowCount / SENSOR_PER_CELL_Y));
+    if (!Number.isFinite(col) || !Number.isFinite(row) ||
+        col < 0 || col >= cols || row < 0 || row >= rows) return;
+
+    const size = faceCanvasSize(face);
+    const event = {
+      type: 'idle-echo',
+      id: ++this._idleEchoSeq,
+      faceName,
+      cellCol: col,
+      cellRow: row,
+      x: face.originX + (col + 0.5) * (size.width / cols),
+      y: face.originY + (row + 0.5) * (size.height / rows),
+      colorIndex: Math.floor(Math.random() * 8),
+      durationMs: 1000,
+    };
+    if (clientEchoId != null && String(clientEchoId)) {
+      event.clientEchoId = String(clientEchoId);
+    }
+    this._emit(event);
+  }
+
+  handleTouch(faceName, sensorCol, sensorRow, options = {}) {
     if (faceName === ENTRANCE_FACE_NAME) return;
 
     // Mine-freeze: block all inputs while frozen
     if (this.freezeUntil != null && Date.now() < this.freezeUntil) return;
 
-    // idle: center PLAY → tutorial (default) or direct game start (operator-disabled)
+    // Idle is gameplay-inert, but the external standby map can acknowledge
+    // visitors with a short cell echo.
     if (this.phase === 'idle') {
+      this._emitIdleEcho(faceName, sensorCol, sensorRow, options?.clientEchoId);
+      return;
+    }
+
+    // Backend start arms the physical mine trigger; only that button can
+    // launch the presentation intro.
+    if (this.phase === 'armed') {
+      if (this.operatorTransitionStartedAt != null &&
+          Date.now() - this.operatorTransitionStartedAt < this.operatorTransitionDurationMs) {
+        return;
+      }
+      if (this._inStartButton(faceName, sensorCol, sensorRow)) {
+        this._startIntro();
+        this._emit({ type: 'intro-start', snapshot: this.snapshot() });
+      }
+      return;
+    }
+
+    // The ten-second intro is presentation-only and input-locked.
+    if (this.phase === 'intro') return;
+
+    // After the operator-triggered intro, restore the original floor PLAY gate.
+    if (this.phase === 'ready') {
       if (faceName === FLOOR_FACE_NAME && this._inCenterCircle(sensorCol, sensorRow)) {
         if (this.tutorialEnabled) {
           this._startTutorial();
@@ -329,6 +598,10 @@ export class Game {
     // tutorial: only the center CONTINUE button is active. Walls, MARK ring and
     // PAUSE are deliberately inert so the tutorial cannot mutate the real board.
     if (this.phase === 'tutorial') {
+      if (this.tutorialTransitionStartedAt != null &&
+          Date.now() - this.tutorialTransitionStartedAt < this.tutorialTransitionDurationMs) {
+        return;
+      }
       if (faceName === FLOOR_FACE_NAME && this._inCenterCircle(sensorCol, sensorRow)) {
         this._advanceTutorial();
       }
@@ -347,9 +620,17 @@ export class Game {
     // clients all see the same value and cannot restart/skip it with another touch.
     if (this.phase === 'countdown') return;
 
-    // gameOver: inner circle → reset to idle
+    // gameOver: the center action is server-gated so every view shares the
+    // same animation window. Timeout first becomes CONTINUE, then starts the
+    // ending sequence; win goes straight to the final RETURN window.
     if (this.phase === 'gameOver') {
       if (faceName === FLOOR_FACE_NAME && this._inCenterCircle(sensorCol, sensorRow)) {
+        if (this.endActionAt == null || Date.now() < this.endActionAt) return;
+        if (this.endReason === 'timeout' && this.endStage === 'timeout-wave') {
+          this._startTimeoutEnding();
+          this._emit({ type: 'ending-start', snapshot: this.snapshot() });
+          return;
+        }
         this._clearTimers();
         this._reset();
         this._emit({ type: 'reset', snapshot: this.snapshot() });
@@ -357,16 +638,13 @@ export class Game {
       return;
     }
 
-    // paused: inner → resume / outer ring → abort
+    // paused: only the inner RESUME action remains. There is intentionally no
+    // outer-ring abort path; elapsed time and the time-limit timer continue.
     if (this.phase === 'paused') {
       if (faceName !== FLOOR_FACE_NAME) return;
       if (this._inCenterCircle(sensorCol, sensorRow)) {
         this._resumeGame();
         this._emit({ type: 'resume', snapshot: this.snapshot() });
-      } else if (this._inOuterRing(sensorCol, sensorRow)) {
-        this._clearTimers();
-        this._reset();
-        this._emit({ type: 'reset', snapshot: this.snapshot() });
       }
       return;
     }
@@ -416,6 +694,7 @@ export class Game {
         this._handleMineFreeze(cell);
         return;
       }
+      this.lastRevealCellId = cell.id;
       const updated = this._floodReveal(cell);
       this._emit({ type: 'cell-update', cells: updated.map(c => this._publicCell(c)), revealedCount: this.revealedCount });
       if (this.revealedCount === this.total - this.mineCount) this._handleWin();
@@ -467,13 +746,16 @@ export class Game {
   _handleMineFreeze(cell) {
     cell.revealed = true;
     this.bombCellId = cell.id;
-    this.freezeUntil = Date.now() + MINE_FREEZE_MS;
+    const startedAt = Date.now();
+    this.freezeUntil = startedAt + MINE_FREEZE_MS;
     this.redWave = this._buildRedWave(cell.faceName, cell.col, cell.row);
+    this.redWaveStartedAt = startedAt;
     if (this._freezeTimer) clearTimeout(this._freezeTimer);
     this._freezeTimer = setTimeout(() => {
       this._freezeTimer = null;
       this.freezeUntil = null;
       this.redWave = null;
+      this.redWaveStartedAt = null;
       this.bombCellId = null;
       this._emit({ type: 'unfreeze' });
     }, MINE_FREEZE_MS);
@@ -484,33 +766,38 @@ export class Game {
       cells: [this._publicCell(cell)],
       bombCellId: cell.id,
       redWave: this.redWave,
+      redWaveStartedAt: this.redWaveStartedAt,
     });
   }
 
-  // Build a redWave centered on a specific cell. Used by both freeze (mine
-  // cell) and timeout (floor center synthetic origin via faceName=Floor +
-  // chip-mid coords).
+  // Build a redWave centered on a specific board cell. Used by mine freeze.
   _buildRedWave(originFaceName, originCol, originRow) {
-    const CELL_PX = 64;
     const originFace = this.venue.faces.find(f => f.name === originFaceName);
     if (!originFace) return [];
-    const bx = originFace.originX + (originCol + 0.5) * CELL_PX;
-    const by = originFace.originY + (originRow + 0.5) * CELL_PX;
+    const originSize = faceCanvasSize(originFace);
+    const originCols = Math.max(1, Math.floor(originFace.colCount / SENSOR_PER_CELL_X));
+    const originRows = Math.max(1, Math.floor(originFace.rowCount / SENSOR_PER_CELL_Y));
+    const bx = originFace.originX + (originCol + 0.5) * (originSize.width / originCols);
+    const by = originFace.originY + (originRow + 0.5) * (originSize.height / originRows);
+    return this._buildRedWaveAt(bx, by);
+  }
+
+  _buildRedWaveAt(originX, originY) {
     const wave = [];
     for (const face of this.venue.faces) {
       const facCols = Math.floor(face.colCount / SENSOR_PER_CELL_X);
       const facRows = Math.floor(face.rowCount / SENSOR_PER_CELL_Y);
       const fm = this.faceMap.get(face.name);
+      const size = faceCanvasSize(face);
+      const cellW = size.width / Math.max(1, facCols);
+      const cellH = size.height / Math.max(1, facRows);
       for (let c = 0; c < facCols; c++) {
         for (let r = 0; r < facRows; r++) {
-          const cx = face.originX + (c + 0.5) * CELL_PX;
-          const cy = face.originY + (r + 0.5) * CELL_PX;
-          wave.push({
-            faceName: face.name,
-            col: c, row: r,
-            dist: Math.hypot(cx - bx, cy - by),
-            cellId: fm?.grid?.[c]?.[r] ?? null,
-          });
+          const cx = face.originX + (c + 0.5) * cellW;
+          const cy = face.originY + (r + 0.5) * cellH;
+          wave.push({ faceName: face.name, col: c, row: r,
+            dist: Math.hypot(cx - originX, cy - originY),
+            cellId: fm?.grid?.[c]?.[r] ?? null });
         }
       }
     }
@@ -525,25 +812,77 @@ export class Game {
     this.won = true;
     this.endReason = 'win';
     this.gameEndMs = Date.now();
+    this.endingStartedAt = this.gameEndMs;
+    this.endStage = 'win-ending';
+    this.endActionAt = this.gameEndMs + WIN_ENDING_DURATION_MS;
     this._emit({ type: 'game-over', won: true, reason: 'win', snapshot: this.snapshot() });
   }
 
   _handleTimeout() {
-    if (this.phase !== 'playing') return;
+    if (this.phase !== 'playing' && this.phase !== 'paused') return;
     this._clearTimers();
     this.phase = 'gameOver';
     this.gameOver = true;
     this.won = false;
     this.endReason = 'timeout';
     this.gameEndMs = Date.now();
+    this.endingStartedAt = null;
+    this.endStage = 'timeout-wave';
+    this.endActionAt = this.gameEndMs + RED_WAVE_DURATION_MS + ENDING_SETTLE_MS;
+    this.pausedAt = null;
     this.freezeUntil = null;
-    // Wave radiates from floor center (chip 22,64) → no specific mine.
-    this.redWave = this._buildRedWave(FLOOR_FACE_NAME, 22, 64);
+    this.bombCellId = null;
+    // Wave radiates from the visual floor center, not a sensor coordinate.
+    this.redWave = this._buildRedWaveAt(
+      this.animationOrigins.timeout.x,
+      this.animationOrigins.timeout.y,
+    );
+    this.redWaveStartedAt = this.gameEndMs;
     this._emit({
       type: 'game-over', won: false, reason: 'timeout',
       redWave: this.redWave,
       snapshot: this.snapshot(),
     });
+  }
+
+  _startTimeoutEnding() {
+    this.redWave = null;
+    this.redWaveStartedAt = null;
+    this.endingStartedAt = Date.now();
+    this.endStage = 'timeout-ending';
+    this.endActionAt = this.endingStartedAt + TIMEOUT_ENDING_DURATION_MS;
+  }
+
+  endFromOperator() {
+    if (this.phase === 'idle') return false;
+    this._clearTimers();
+    // Keep the round snapshot visible so every display can show the final
+    // score instead of losing the board by resetting straight to idle.
+    this.phase = 'gameOver';
+    this.gameOver = true;
+    this.won = false;
+    this.endReason = 'operator';
+    this.gameEndMs ??= Date.now();
+    this.endingStartedAt = this.gameEndMs;
+    this.endStage = 'operator-ending';
+    this.endActionAt = this.gameEndMs;
+    this.introStartedAt = null;
+    this.operatorTransitionStartedAt = null;
+    this.tutorialTransitionStartedAt = null;
+    this.tutorialStep = null;
+    this.countdownValue = null;
+    this.pausedAt = null;
+    this.freezeUntil = null;
+    this.bombCellId = null;
+    this.redWave = null;
+    this.redWaveStartedAt = null;
+    this._emit({
+      type: 'game-over',
+      won: false,
+      reason: 'operator',
+      snapshot: this.snapshot(),
+    });
+    return true;
   }
 
   reset() {

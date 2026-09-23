@@ -50,7 +50,13 @@ const httpServer = createServer(async (req, res) => {
   try {
     const data = await readFile(filePath);
     const ext = filePath.split('.').pop();
-    res.writeHead(200, { 'Content-Type': MIME[ext] ?? 'application/octet-stream' });
+    res.writeHead(200, {
+      'Content-Type': MIME[ext] ?? 'application/octet-stream',
+      // The operator view is edited and tested live during venue setup.
+      // Prevent Chromium from keeping an older JSX-transpiled asset around.
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+      'Pragma': 'no-cache',
+    });
     res.end(data);
   } catch {
     res.writeHead(404); res.end('Not found');
@@ -77,7 +83,7 @@ wss.on('connection', (ws) => {
       // Mirror real sensor path so the operator can test calibration with
       // mouse clicks: record event, auto-lock in calibration mode, drop on
       // hit, else hand off to the game.
-      handleSensorInput(msg.face, msg.sensorCol, msg.sensorRow);
+      handleSensorInput(msg.face, msg.sensorCol, msg.sensorRow, msg.clientEchoId);
       return;
     }
 
@@ -110,6 +116,19 @@ wss.on('connection', (ws) => {
       game.setTutorialEnabled(!!msg.enabled);
       return;
     }
+
+    if (msg.type === 'start-game') {
+      // Start is operator-only: the field is intentionally inert while idle.
+      game.startFromOperator();
+      return;
+    }
+
+    if (msg.type === 'end-game') {
+      // Operator-only hard stop: immediately return every external view to
+      // standby, regardless of the current round phase.
+      game.endFromOperator();
+      return;
+    }
   });
   ws.on('close', () => clients.delete(ws));
   ws.on('error', () => clients.delete(ws));
@@ -117,7 +136,7 @@ wss.on('connection', (ws) => {
 
 // Single funnel for both TouchService and inject-touch — filter once, route
 // to Game once. Operator-facing UI talks to this through the same path.
-function handleSensorInput(faceName, sensorCol, sensorRow) {
+function handleSensorInput(faceName, sensorCol, sensorRow, clientEchoId = null) {
   const k = lockKey(faceName, sensorCol, sensorRow);
   sensorLock.recordEvent(k);
   if (sensorLock.lockMode) {
@@ -129,7 +148,7 @@ function handleSensorInput(faceName, sensorCol, sensorRow) {
     sensorLock.noteFiltered();
     return;
   }
-  game.handleTouch(faceName, sensorCol, sensorRow);
+  game.handleTouch(faceName, sensorCol, sensorRow, { clientEchoId });
 }
 
 function broadcast(msg) {

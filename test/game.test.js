@@ -14,11 +14,12 @@ const topology = JSON.parse(await readFile(resolve(ROOT, 'config/board-topology.
 // Floor donut geometry (chip coords matching server's distance computation)
 // chip center venue px: (col * 32 + 16, row * 16 + 8); floor center (704, 1024)
 //   SCAN inner r = 210, MARK outer r = 290 (ring width 80)
-//   PAUSE box chip cols 19..24 × rows 104..115
+//   PAUSE box chip cols 19..24 × rows 84..95
 const CENTER_CHIP = [22, 64];   // (720, 1032), d ≈ 17.9  → inner circle
 const SCAN_CHIP   = [22, 64];   // same as CENTER (idle: start; playing: scan)
 const MARK_CHIP   = [22, 79];   // (720, 1272), d ≈ 248    → outer ring (210 < 248 ≤ 290)
-const PAUSE_CHIP  = [22, 110];  // pause box
+const PAUSE_CHIP  = [22, 90];   // pause box
+const START_TRIGGER_CHIP = [11, 66]; // Wall Left board col 5,row 16 center
 
 function newGame(opts = {}) {
   return new Game(venue, topology, { mineRate: 0.15, seed: 1, ...opts });
@@ -28,10 +29,20 @@ function finishCountdownNow(g) {
   g._countdownTimer = null;
   g._startGame();
 }
+function completeOperatorIntro(g) {
+  assert.equal(g.startFromOperator(), true);
+  assert.equal(g.phase, 'armed');
+  assert.equal(g._completeOperatorTransition(), true);
+  g.handleTouch('Wall Left', ...START_TRIGGER_CHIP);
+  assert.equal(g.phase, 'intro');
+  assert.equal(g._completeIntro(), true);
+  assert.equal(g.phase, 'ready');
+}
 function newStartedGame(opts = {}) {
   const g = newGame(opts);
   // Most existing tests exercise gameplay itself, not the pre-game tutorial/countdown.
   g.setTutorialEnabled(false);
+  completeOperatorIntro(g);
   g.handleTouch('Floor', ...CENTER_CHIP);
   assert.equal(g.phase, 'countdown');
   finishCountdownNow(g);
@@ -60,6 +71,44 @@ test('初始狀態 = idle, gameStartMs=null, phase=idle, currentMode=reveal', ()
   // time limit defaults
   assert.equal(s.timeLimit.enabled, false);
   assert.equal(s.timeLimit.ms, 10 * 60 * 1000);
+  assert.deepEqual(s.animationOrigins.intro, {
+    faceName: 'Wall Left',
+    x: 352,
+    y: 1696,
+  });
+  assert.deepEqual(s.startButton, {
+    faceName: 'Wall Left',
+    boardCol: 4,
+    boardRow: 15,
+    boardCols: 3,
+    boardRows: 3,
+    x: 352,
+    y: 1696,
+    width: 192,
+    height: 192,
+    sensorColMin: 8,
+    sensorColMax: 14,
+    sensorRowMin: 60,
+    sensorRowMax: 72,
+  });
+  assert.deepEqual(s.animationOrigins.timeout, {
+    faceName: 'Floor',
+    x: 1344,
+    y: 1664,
+  });
+  assert.equal(s.animationDurations.intro, 10000);
+  assert.equal(s.animationDurations.operatorTransition, 4000);
+  assert.equal(s.animationDurations.tutorialTransition, 6000);
+  assert.ok(Number.isFinite(s.serverNowMs));
+});
+
+test('超時紅波從場域內的 Floor 中心開始', () => {
+  const g = newStartedGame();
+  g._handleTimeout();
+  assert.equal(g.endReason, 'timeout');
+  assert.ok(g.redWave?.length > 0);
+  assert.ok(g.redWave[0].dist < 100, '第一批 Floor 格應靠近 Floor 中心');
+  assert.ok(g.redWave.every(w => w.dist >= 0 && Number.isFinite(w.dist)));
 });
 
 // ── PRE-GAME TUTORIAL ──────────────────────────────────────
@@ -67,6 +116,7 @@ test('預設 PLAY → tutorial step 0,尚未啟動正式計時', () => {
   const g = newGame();
   const events = [];
   g.on(e => events.push(e));
+  completeOperatorIntro(g);
   g.handleTouch('Floor', ...CENTER_CHIP);
   assert.equal(g.phase, 'tutorial');
   assert.equal(g.tutorialStep, 0);
@@ -78,7 +128,9 @@ test('預設 PLAY → tutorial step 0,尚未啟動正式計時', () => {
 test('四次 CONTINUE → tutorialReady,再 PLAY 先進 countdown', () => {
   const g = newGame();
   g.setTimeLimit({ enabled: true, ms: 10000 });
+  completeOperatorIntro(g);
   g.handleTouch('Floor', ...CENTER_CHIP); // PLAY → step 0
+  assert.equal(g._completeTutorialTransition(), true);
   for (let expected = 1; expected <= 3; expected++) {
     g.handleTouch('Floor', ...CENTER_CHIP);
     assert.equal(g.phase, 'tutorial');
@@ -106,6 +158,7 @@ test('countdown 依序 3→2→1,最後才開始正式計時', async () => {
   const events = [];
   g.on(e => events.push(e));
   g.setTutorialEnabled(false);
+  completeOperatorIntro(g);
   g.setTimeLimit({ enabled: true, ms: 10000 });
   g.handleTouch('Floor', ...CENTER_CHIP);
   assert.equal(g.phase, 'countdown');
@@ -130,6 +183,7 @@ test('countdown 依序 3→2→1,最後才開始正式計時', async () => {
 test('countdown 期間所有觸控無效', () => {
   const g = newGame();
   g.setTutorialEnabled(false);
+  completeOperatorIntro(g);
   g.handleTouch('Floor', ...CENTER_CHIP);
   const safe = g.cells.find(c => !c.mine);
   g.handleTouch(safe.faceName, safe.col * 2, safe.row * 4);
@@ -145,7 +199,9 @@ test('countdown 期間所有觸控無效', () => {
 
 test('tutorial 中牆面、MARK、PAUSE 觸控全部無效', () => {
   const g = newGame();
+  completeOperatorIntro(g);
   g.handleTouch('Floor', ...CENTER_CHIP);
+  assert.equal(g._completeTutorialTransition(), true);
   const before = g.snapshot();
   const safe = g.cells.find(c => !c.mine);
   g.handleTouch(safe.faceName, safe.col * 2, safe.row * 4);
@@ -164,6 +220,7 @@ test('營運關閉教學後 PLAY 仍先進 countdown', () => {
   const events = [];
   g.on(e => events.push(e));
   assert.equal(g.setTutorialEnabled(false), true);
+  completeOperatorIntro(g);
   g.handleTouch('Floor', ...CENTER_CHIP);
   assert.equal(g.phase, 'countdown');
   assert.equal(g.countdownValue, 3);
@@ -177,6 +234,7 @@ test('營運關閉教學後 PLAY 仍先進 countdown', () => {
 test('教學開關只允許 idle 修改,reset 後仍保留', () => {
   const g = newGame();
   g.setTutorialEnabled(false);
+  completeOperatorIntro(g);
   g.handleTouch('Floor', ...CENTER_CHIP);
   assert.equal(g.phase, 'countdown');
   assert.equal(g.setTutorialEnabled(true), false);
@@ -187,7 +245,7 @@ test('教學開關只允許 idle 修改,reset 後仍保留', () => {
   assert.equal(g.tutorialStep, null);
 });
 
-test('idle: 摸牆 / Floor 非按鈕區 都被忽略', () => {
+test('idle: 摸牆 / Floor 只產生待機回音,不改變遊戲狀態', () => {
   const g = newGame();
   const events = [];
   g.on(e => events.push(e));
@@ -195,18 +253,84 @@ test('idle: 摸牆 / Floor 非按鈕區 都被忽略', () => {
   g.handleTouch('Floor', 5, 5);   // far corner, no button
   g.handleTouch('Floor', 40, 80); // far corner, no button
   assert.equal(g.phase, 'idle');
-  assert.equal(events.length, 0);
+  assert.equal(g.gameStartMs, null);
+  assert.equal(g.revealedCount, 0);
+  assert.equal(events.length, 3);
+  for (const event of events) {
+    assert.equal(event.type, 'idle-echo');
+    assert.ok(event.id > 0);
+    assert.ok(event.faceName);
+    assert.ok(event.cellCol >= 0);
+    assert.ok(event.cellRow >= 0);
+    assert.ok(event.colorIndex >= 0 && event.colorIndex < 8);
+  }
 });
 
-test('idle: 教學關閉時踩 Floor 中央 → countdown-start 事件', () => {
+test('idle 回音保留前端 request id,可與立即顯示的回音對齊', () => {
+  const g = newGame();
+  const events = [];
+  g.on(e => events.push(e));
+  g.handleTouch('Wall Top', 8, 12, { clientEchoId: 'local-echo-1' });
+  assert.equal(events[0].clientEchoId, 'local-echo-1');
+  assert.equal(events[0].durationMs, 1000);
+});
+
+test('time limit 接收 01 分的毫秒值時維持 60000ms', () => {
+  const g = newGame();
+  g.setTimeLimit({ enabled: true, ms: '60000' });
+  assert.equal(g.timeLimit.enabled, true);
+  assert.equal(g.timeLimit.ms, 60000);
+});
+
+test('idle: 地板中央不會啟動,後台啟動後才可進 countdown', () => {
   const g = newGame();
   const events = [];
   g.on(e => events.push(e));
   g.setTutorialEnabled(false);
   g.handleTouch('Floor', ...CENTER_CHIP);
+  assert.equal(g.phase, 'idle');
+  assert.equal(events.some(e => e.type === 'countdown-start'), false);
+  completeOperatorIntro(g);
+  g.handleTouch('Floor', ...CENTER_CHIP);
   assert.equal(g.phase, 'countdown');
   assert.ok(events.find(e => e.type === 'countdown-start'));
   g._clearTimers();
+});
+
+test('後台啟動後先等待 Wall Left 地雷按鈕,其他觸控無效', () => {
+  const g = newGame();
+  const events = [];
+  g.on(e => events.push(e));
+  assert.equal(g.startFromOperator(), true);
+  assert.equal(g.phase, 'armed');
+  assert.equal(g.introStartedAt, null);
+  assert.equal(g._completeOperatorTransition(), true);
+  g.handleTouch('Floor', ...CENTER_CHIP);
+  g.handleTouch('Wall Top', 8, 12);
+  g.handleTouch('Wall Left', 7, 66);
+  assert.equal(g.phase, 'armed');
+  assert.equal(events.some(e => e.type === 'intro-start'), false);
+  g.handleTouch('Wall Left', ...START_TRIGGER_CHIP);
+  assert.equal(g.phase, 'intro');
+  assert.ok(g.introStartedAt != null);
+  assert.ok(events.find(e => e.type === 'intro-start'));
+  g._clearTimers();
+});
+
+test('後台前導完成後才開放 PLAY', async () => {
+  const g = newGame({ introDurationMs: 15 });
+  assert.equal(g.startFromOperator(), true);
+  assert.equal(g.phase, 'armed');
+  assert.equal(g._completeOperatorTransition(), true);
+  g.handleTouch('Wall Left', ...START_TRIGGER_CHIP);
+  assert.equal(g.phase, 'intro');
+  g.handleTouch('Floor', ...CENTER_CHIP);
+  assert.equal(g.phase, 'intro');
+  await new Promise(r => setTimeout(r, 30));
+  assert.equal(g.phase, 'ready');
+  assert.equal(g.introStartedAt, null);
+  g.handleTouch('Floor', ...CENTER_CHIP);
+  assert.equal(g.phase, 'tutorial');
 });
 
 test('default mode = reveal: 摸牆 game area → 直接 reveal', () => {
@@ -368,6 +492,8 @@ test('win:揭露所有 safe 格 → gameOver won=true reason=win', () => {
   assert.equal(g.phase, 'gameOver');
   assert.equal(g.won, true);
   assert.equal(g.endReason, 'win');
+  assert.equal(g.endStage, 'win-ending');
+  assert.equal(g.endActionAt, g.gameEndMs + 6200);
 });
 
 // ── TIME LIMIT ─────────────────────────────────────────────
@@ -384,6 +510,7 @@ test('setTimeLimit 更新設定', () => {
 test('time-limit enabled + 到時 → timeout gameOver', async () => {
   const g = newGame();
   g.setTutorialEnabled(false);
+  completeOperatorIntro(g);
   g.setTimeLimit({ enabled: true, ms: 50 });
   g.handleTouch('Floor', ...CENTER_CHIP);
   finishCountdownNow(g);
@@ -398,6 +525,7 @@ test('time-limit enabled + 到時 → timeout gameOver', async () => {
 test('time-limit disabled → 不 fire timeout', async () => {
   const g = newGame();
   g.setTutorialEnabled(false);
+  completeOperatorIntro(g);
   g.setTimeLimit({ enabled: false, ms: 50 });
   g.handleTouch('Floor', ...CENTER_CHIP);
   finishCountdownNow(g);
@@ -405,22 +533,18 @@ test('time-limit disabled → 不 fire timeout', async () => {
   assert.equal(g.phase, 'playing');
 });
 
-test('pause/resume 期間 time-limit 暫停', async () => {
+test('pause 期間 time-limit 仍持續計算並進入 timeout', async () => {
   const g = newGame();
   g.setTutorialEnabled(false);
-  g.setTimeLimit({ enabled: true, ms: 100 });
+  completeOperatorIntro(g);
+  g.setTimeLimit({ enabled: true, ms: 150 });
   g.handleTouch('Floor', ...CENTER_CHIP);
   finishCountdownNow(g);
   await new Promise(r => setTimeout(r, 40));
   g.handleTouch('Floor', ...PAUSE_CHIP);
   assert.equal(g.phase, 'paused');
-  // 在 paused 期間等久一點,time-limit 不該到
-  await new Promise(r => setTimeout(r, 100));
-  assert.equal(g.phase, 'paused', 'paused 中 time-limit 不 fire');
-  g.handleTouch('Floor', ...CENTER_CHIP); // resume (inner circle)
-  assert.equal(g.phase, 'playing');
-  await new Promise(r => setTimeout(r, 80));
-  assert.equal(g.phase, 'gameOver', 'resume 後剩餘時間到 → timeout');
+  await new Promise(r => setTimeout(r, 130));
+  assert.equal(g.phase, 'gameOver', 'paused 中時間到仍進入 timeout');
   assert.equal(g.endReason, 'timeout');
 });
 
@@ -431,7 +555,7 @@ test('playing 中踩 PAUSE 按鈕 → paused', () => {
   assert.equal(g.phase, 'paused');
 });
 
-test('paused → 內圈 = resume (gameStartMs 推後)', async () => {
+test('paused → 內圈 = resume (gameStartMs 不推後)', async () => {
   const g = newStartedGame();
   const originalStart = g.gameStartMs;
   await new Promise(r => setTimeout(r, 20));
@@ -440,18 +564,76 @@ test('paused → 內圈 = resume (gameStartMs 推後)', async () => {
   await new Promise(r => setTimeout(r, 50));
   g.handleTouch('Floor', ...CENTER_CHIP);
   assert.equal(g.phase, 'playing');
-  assert.ok(g.gameStartMs > originalStart);
+  assert.equal(g.gameStartMs, originalStart);
 });
 
-test('paused → 外圈 = abort → 回 idle', () => {
+test('paused → 外圈不再提供 ABORT,仍維持 paused', () => {
   const g = newStartedGame();
   g.handleTouch('Floor', ...PAUSE_CHIP);
   assert.equal(g.phase, 'paused');
-  g.handleTouch('Floor', ...MARK_CHIP); // outer ring = abort
-  assert.equal(g.phase, 'idle');
+  g.handleTouch('Floor', ...MARK_CHIP); // 舊 ABORT 位置
+  assert.equal(g.phase, 'paused');
 });
 
-test('gameOver 後一般觸控被忽略,只接受 Floor 內圈 → 回到 idle', () => {
+test('後台結束遊戲會保留本局資料並立即進入成績頁', () => {
+  const cases = [];
+
+  const intro = newGame({ introDurationMs: 60_000 });
+  intro.startFromOperator();
+  cases.push(intro);
+
+  const ready = newGame();
+  completeOperatorIntro(ready);
+  cases.push(ready);
+
+  const countdown = newGame();
+  countdown.setTutorialEnabled(false);
+  completeOperatorIntro(countdown);
+  countdown.handleTouch('Floor', ...CENTER_CHIP);
+  cases.push(countdown);
+
+  const playing = newStartedGame();
+  cases.push(playing);
+
+  const paused = newStartedGame();
+  paused.handleTouch('Floor', ...PAUSE_CHIP);
+  cases.push(paused);
+
+  const gameOver = newStartedGame();
+  gameOver._handleTimeout();
+  cases.push(gameOver);
+
+  for (const g of cases) {
+    const events = [];
+    g.on(e => events.push(e));
+    const before = g.snapshot();
+    assert.equal(g.endFromOperator(), true);
+    assert.equal(g.phase, 'gameOver');
+    assert.equal(g.gameOver, true);
+    assert.equal(g.won, false);
+    assert.equal(g.endReason, 'operator');
+    assert.equal(g.endStage, 'operator-ending');
+    assert.equal(g.gameStartMs, before.gameStartMs);
+    assert.equal(g.snapshot().flaggedCount, before.flaggedCount);
+    assert.equal(g.snapshot().revealedCount, before.revealedCount);
+    assert.equal(g._timeLimitTimer, null);
+    assert.equal(g._freezeTimer, null);
+    assert.equal(g._countdownTimer, null);
+    assert.equal(g._introTimer, null);
+    assert.equal(events.at(-1).type, 'game-over');
+    assert.equal(events.at(-1).reason, 'operator');
+  }
+});
+
+test('idle 狀態按後台結束遊戲不會產生重置事件', () => {
+  const g = newGame();
+  const events = [];
+  g.on(e => events.push(e));
+  assert.equal(g.endFromOperator(), false);
+  assert.equal(events.length, 0);
+});
+
+test('gameOver 後受結尾時間閘門控制,timeout 先 CONTINUE 再 RETURN', () => {
   const g = gameWithFirstRevealDone();
   // 強制 timeout 結束
   g._handleTimeout();
@@ -460,7 +642,15 @@ test('gameOver 後一般觸控被忽略,只接受 Floor 內圈 → 回到 idle',
   assert.equal(g.phase, 'gameOver');
   g.handleTouch('Floor', ...MARK_CHIP); // 外圈
   assert.equal(g.phase, 'gameOver', '外圈不重啟');
-  g.handleTouch('Floor', ...CENTER_CHIP); // 內圈
+  g.handleTouch('Floor', ...CENTER_CHIP); // 波紋尚未完成
+  assert.equal(g.phase, 'gameOver');
+  g.endActionAt = Date.now();
+  g.handleTouch('Floor', ...CENTER_CHIP); // CONTINUE → ending
+  assert.equal(g.phase, 'gameOver');
+  assert.equal(g.endStage, 'timeout-ending');
+  assert.equal(g.redWave, null);
+  g.endActionAt = Date.now();
+  g.handleTouch('Floor', ...CENTER_CHIP); // RETURN
   assert.equal(g.phase, 'idle');
 });
 
@@ -498,6 +688,7 @@ test('遊戲中誤標不洩漏數字 (不然 MARK 會變成零風險探測)', ()
 test('gameOver 後誤標揭曉真實數字,但不計入已揭露', async () => {
   const g = newGame();
   g.setTutorialEnabled(false);
+  completeOperatorIntro(g);
   g.setTimeLimit({ enabled: true, ms: 60 });
   g.handleTouch('Floor', ...CENTER_CHIP);
   finishCountdownNow(g);
@@ -518,6 +709,7 @@ test('gameOver 後誤標揭曉真實數字,但不計入已揭露', async () => {
 test('gameOver 後正確標記的雷不算誤標', async () => {
   const g = newGame();
   g.setTutorialEnabled(false);
+  completeOperatorIntro(g);
   g.setTimeLimit({ enabled: true, ms: 60 });
   g.handleTouch('Floor', ...CENTER_CHIP);
   finishCountdownNow(g);
@@ -534,6 +726,7 @@ test('gameOver 後正確標記的雷不算誤標', async () => {
 test('gameOver 只揭曉誤標的數字,沒標的隱藏格仍不洩漏', async () => {
   const g = newGame();
   g.setTutorialEnabled(false);
+  completeOperatorIntro(g);
   g.setTimeLimit({ enabled: true, ms: 60 });
   g.handleTouch('Floor', ...CENTER_CHIP);
   finishCountdownNow(g);

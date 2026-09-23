@@ -1,0 +1,244 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1280" viewBox="0 0 1920 1280">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#05070b"/>
+      <stop offset="1" stop-color="#10131b"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#151b25"/>
+      <stop offset="1" stop-color="#0b0f16"/>
+    </linearGradient>
+    <linearGradient id="red" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff304e"/>
+      <stop offset="1" stop-color="#8f1028"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffe18a"/>
+      <stop offset="1" stop-color="#c99121"/>
+    </linearGradient>
+    <filter id="glowCyan">
+      <feGaussianBlur stdDeviation="7" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glowRed">
+      <feGaussianBlur stdDeviation="12" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      .ui { font-family: "Microsoft JhengHei", "Noto Sans CJK TC", "Segoe UI", sans-serif; }
+      .title { fill:#e9f3f6; font-size:38px; font-weight:800; letter-spacing:2px; }
+      .subtitle { fill:#8ba0af; font-size:18px; font-weight:600; letter-spacing:1px; }
+      .panelTitle { fill:#e9f3f6; font-size:22px; font-weight:800; }
+      .panelNote { fill:#aab8c2; font-size:16px; font-weight:500; }
+      .tiny { fill:#718392; font-size:13px; font-weight:600; letter-spacing:1px; }
+      .cyan { fill:#00ffe5; }
+      .green { fill:#39ff14; }
+      .redText { fill:#ff3b56; }
+      .goldText { fill:#ffd46a; }
+    </style>
+  </defs>
+
+  <rect width="1920" height="1280" fill="url(#bg)"/>
+  <rect x="54" y="42" width="1812" height="1196" rx="18" fill="none" stroke="#263340" stroke-width="2"/>
+
+  <text x="88" y="100" class="ui title">光域704｜動畫分鏡 V3.1</text>
+  <text x="88" y="132" class="ui subtitle">文件確認稿：企畫書原案與修正提案分開呈現，尚未開始動畫製作</text>
+  <rect x="1090" y="72" width="258" height="34" fill="#291313" stroke="#ff304e" stroke-width="2"/>
+  <text x="1219" y="94" text-anchor="middle" class="ui" fill="#ffd9de" font-size="14" font-weight="900">CONFIRMATION ONLY / NO PRODUCTION</text>
+  <text x="88" y="158" class="ui tiny">標記：原案流程保留；「修正提案」為本輪加入分鏡供確認，尚不代表最終製作決策。</text>
+  <g class="ui">
+    <rect x="1392" y="77" width="18" height="18" fill="#39ff14"/>
+    <text x="1422" y="93" class="subtitle">前導 / 待機</text>
+    <rect x="1550" y="77" width="18" height="18" fill="#ff304e"/>
+    <text x="1580" y="93" class="subtitle">超時</text>
+    <rect x="1680" y="77" width="18" height="18" fill="#ffd46a"/>
+    <text x="1710" y="93" class="subtitle">過關</text>
+  </g>
+
+  <!-- panel geometry -->
+  <g fill="url(#panel)" stroke="#2a3947" stroke-width="2">
+    <rect x="88" y="180" width="540" height="295" rx="10"/>
+    <rect x="690" y="180" width="540" height="295" rx="10"/>
+    <rect x="1292" y="180" width="540" height="295" rx="10"/>
+    <rect x="88" y="505" width="540" height="295" rx="10"/>
+    <rect x="690" y="505" width="540" height="295" rx="10"/>
+    <rect x="1292" y="505" width="540" height="295" rx="10"/>
+    <rect x="88" y="830" width="540" height="295" rx="10"/>
+    <rect x="690" y="830" width="540" height="295" rx="10"/>
+    <rect x="1292" y="830" width="540" height="295" rx="10"/>
+  </g>
+
+  <!-- arrows -->
+  <g stroke="#4c6578" stroke-width="3" fill="none" opacity=".9">
+    <path d="M628 327 H675"/>
+    <path d="M1230 327 H1277"/>
+    <path d="M960 475 V500"/>
+    <path d="M628 652 H675"/>
+    <path d="M1230 652 H1277"/>
+    <path d="M960 800 V825"/>
+    <path d="M628 977 H675"/>
+    <path d="M1230 977 H1277"/>
+  </g>
+  <g fill="#4c6578">
+    <path d="M675 327 l-13 -8 v16z"/><path d="M1277 327 l-13 -8 v16z"/>
+    <path d="M960 500 l-8 -13 h16z"/><path d="M675 652 l-13 -8 v16z"/>
+    <path d="M1277 652 l-13 -8 v16z"/><path d="M960 825 l-8 -13 h16z"/>
+    <path d="M675 977 l-13 -8 v16z"/><path d="M1277 977 l-13 -8 v16z"/>
+  </g>
+
+  <!-- 1 idle -->
+  <g class="ui">
+    <text x="112" y="218" class="panelTitle">A1｜外部待機：修正提案鎖定場域</text>
+    <text x="112" y="244" class="panelNote">企畫書原案為待機循環；本修正版先不提供玩家場域啟動入口</text>
+    <rect x="112" y="268" width="492" height="170" fill="#070b10" stroke="#203846"/>
+    <path d="M128 288 H588 M128 318 H588 M128 348 H588 M128 378 H588 M128 408 H588" stroke="#132530"/>
+    <path d="M160 268 V438 M205 268 V438 M250 268 V438 M295 268 V438 M340 268 V438 M385 268 V438 M430 268 V438 M475 268 V438 M520 268 V438" stroke="#132530"/>
+    <circle cx="358" cy="353" r="33" fill="none" stroke="#4d6878" stroke-width="2" stroke-dasharray="6 8"/>
+    <path d="M342 337 L374 369 M374 337 L342 369" stroke="#4d6878" stroke-width="3"/>
+    <text x="358" y="410" text-anchor="middle" class="ui" fill="#718392" font-size="14" font-weight="800">NO FIELD START INPUT</text>
+    <text x="135" y="426" class="ui tiny">IDLE / WAITING LOOP / TOUCH LOCKED</text>
+  </g>
+
+  <!-- 2 press -->
+  <g class="ui">
+    <text x="714" y="218" class="panelTitle">A2｜修正提案：後台按下「開始遊戲」</text>
+    <text x="714" y="244" class="panelNote">原案由 Wall Left 觸發；本稿改由後台啟動，波紋仍以 Wall Left 為視覺起點</text>
+    <rect x="714" y="268" width="492" height="170" fill="#070b10" stroke="#203846"/>
+    <rect x="745" y="298" width="210" height="108" fill="#101922" stroke="#263d4c"/>
+    <text x="770" y="326" class="ui tiny">CONTROL ROOM</text>
+    <text x="770" y="355" class="ui" fill="#e9f3f6" font-size="17" font-weight="800">ROUND READY</text>
+    <circle cx="778" cy="385" r="6" fill="#39ff14"/>
+    <text x="795" y="390" class="ui" fill="#9fb3bf" font-size="13" font-weight="700">場域確認完成</text>
+    <rect x="987" y="307" width="162" height="76" fill="#173e28" stroke="#39ff14" stroke-width="3"/>
+    <text x="1068" y="342" text-anchor="middle" class="ui green" font-size="27" font-weight="900">▶</text>
+    <text x="1068" y="369" text-anchor="middle" class="ui" fill="#d9f9df" font-size="15" font-weight="800">開始遊戲</text>
+    <path d="M1158 345 H1190" stroke="#39ff14" stroke-width="3"/>
+    <path d="M1185 337 l12 8 -12 8" fill="none" stroke="#39ff14" stroke-width="3"/>
+    <text x="960" y="425" text-anchor="middle" class="ui tiny">BACKEND START → ENABLE FIELD FLOW</text>
+  </g>
+
+  <!-- 3 expansion -->
+  <g class="ui">
+    <text x="1316" y="218" class="panelTitle">A3｜修正提案：前導 0-5 秒</text>
+    <text x="1316" y="244" class="panelNote">由 Wall Left 地雷位置向全場展開；期間鎖定所有場域觸控</text>
+    <rect x="1316" y="268" width="492" height="170" fill="#070b10" stroke="#203846"/>
+    <g stroke="#00ffe5" fill="none" opacity=".65" filter="url(#glowCyan)">
+      <circle cx="1562" cy="353" r="18" stroke-width="3"/>
+      <circle cx="1562" cy="353" r="36" stroke-width="2"/>
+      <circle cx="1562" cy="353" r="58" stroke-width="2"/>
+      <circle cx="1562" cy="353" r="82" stroke-width="2"/>
+    </g>
+    <path d="M1328 290 H1796 M1328 416 H1796 M1348 270 V436 M1776 270 V436" stroke="#00ffe5" opacity=".18"/>
+    <text x="1342" y="426" class="ui tiny">0s ─────────────── 5s / FULL FIELD BREACH</text>
+  </g>
+
+  <!-- 4 title -->
+  <g class="ui">
+    <text x="112" y="543" class="panelTitle">A4｜企畫書原案：標題浮現</text>
+    <text x="112" y="569" class="panelNote">擴散進場後，Cybercube Minesweeper 短暫漂浮於牆面，再設計退場動畫</text>
+    <rect x="112" y="593" width="492" height="170" fill="#070b10" stroke="#203846"/>
+    <text x="358" y="667" text-anchor="middle" fill="#e9f3f6" font-size="31" font-weight="900" letter-spacing="2" class="ui">CYBERCUBE</text>
+    <text x="358" y="710" text-anchor="middle" fill="#00ffe5" font-size="27" font-weight="900" letter-spacing="2" class="ui">MINESWEEPER</text>
+    <path d="M180 735 H536" stroke="#00ffe5" opacity=".45"/>
+    <text x="130" y="751" class="ui tiny">FLOAT / HOLD / TRANSITION</text>
+  </g>
+
+  <!-- 5 fade in -->
+  <g class="ui">
+    <text x="714" y="543" class="panelTitle">A5｜原案保留＋修正閘門</text>
+    <text x="714" y="569" class="panelNote">主遊戲待機 fade in；完成後才進入 ready，需離開 PLAY 再重新踩入</text>
+    <rect x="714" y="593" width="492" height="170" fill="#070b10" stroke="#203846"/>
+    <g opacity=".3">
+      <path d="M730 617 H1190 M730 647 H1190 M730 677 H1190 M730 707 H1190 M730 737 H1190" stroke="#263640"/>
+      <path d="M760 593 V763 M805 593 V763 M850 593 V763 M895 593 V763 M940 593 V763 M985 593 V763 M1030 593 V763 M1075 593 V763 M1120 593 V763 M1165 593 V763" stroke="#263640"/>
+    </g>
+    <rect x="850" y="646" width="108" height="82" fill="#291313" stroke="#ff304e" stroke-width="3" opacity=".95"/>
+    <text x="904" y="680" text-anchor="middle" class="ui redText" font-size="28" font-weight="900">⚑</text>
+    <text x="904" y="710" text-anchor="middle" class="ui" fill="#ffd9de" font-size="13" font-weight="800">MARK</text>
+    <rect x="962" y="646" width="108" height="82" fill="#173e28" stroke="#39ff14" stroke-width="3" opacity=".95"/>
+    <text x="1016" y="680" text-anchor="middle" class="ui green" font-size="28" font-weight="900">⛏</text>
+    <text x="1016" y="710" text-anchor="middle" class="ui" fill="#d9f9df" font-size="13" font-weight="800">REVEAL</text>
+    <text x="733" y="735" class="ui tiny">PAUSE / RESUME ONLY · NO ABORT · TIMER CONTINUES</text>
+    <text x="733" y="751" class="ui tiny">FADE IN COMPLETE → FIELD CONTROLS ENABLED</text>
+  </g>
+
+  <!-- 6 timeout -->
+  <g class="ui">
+    <text x="1316" y="543" class="panelTitle">B1｜修正提案：超時後才出現 CONTINUE</text>
+    <text x="1316" y="569" class="panelNote">企畫書原案保留 TIME OUT 與紅色波紋；按下 CONTINUE 才開始結尾</text>
+    <rect x="1316" y="593" width="492" height="170" fill="#070b10" stroke="#203846"/>
+    <g stroke="#ff304e" fill="none" opacity=".8" filter="url(#glowRed)">
+      <circle cx="1562" cy="678" r="18" stroke-width="5"/>
+      <circle cx="1562" cy="678" r="36" stroke-width="3"/>
+      <circle cx="1562" cy="678" r="55" stroke-width="3"/>
+      <circle cx="1562" cy="678" r="72" stroke-width="2"/>
+    </g>
+    <text x="1562" y="673" text-anchor="middle" class="ui redText" font-size="34" font-weight="900">TIME OUT</text>
+    <text x="1562" y="704" text-anchor="middle" fill="#ffd9de" font-size="14" font-weight="700" class="ui">波紋完成 → 揭露／標記入口融合成</text>
+    <rect x="1485" y="718" width="154" height="28" fill="#3a1520" stroke="#ff304e" stroke-width="2"/>
+    <text x="1562" y="738" text-anchor="middle" class="ui" fill="#ffd9de" font-size="14" font-weight="900">CONTINUE</text>
+  </g>
+
+  <!-- 7 win -->
+  <g class="ui">
+    <text x="112" y="868" class="panelTitle">B2｜企畫書原案：過關分支</text>
+    <text x="112" y="894" class="panelNote">最後一格觸發金色波紋；地板按鈕先消失，再保留大字 YOU WIN</text>
+    <rect x="112" y="918" width="492" height="170" fill="#070b10" stroke="#203846"/>
+    <g stroke="#ffd46a" fill="none" opacity=".82">
+      <circle cx="270" cy="1003" r="22" stroke-width="5"/>
+      <circle cx="270" cy="1003" r="46" stroke-width="3"/>
+      <circle cx="270" cy="1003" r="75" stroke-width="2"/>
+    </g>
+    <text x="465" y="990" text-anchor="middle" class="ui goldText" font-size="32" font-weight="900">YOU WIN</text>
+    <text x="465" y="1023" text-anchor="middle" fill="#fff2c1" font-size="15" font-weight="800" class="ui">ALL BUTTONS HIDDEN FIRST</text>
+    <rect x="155" y="1050" width="52" height="20" fill="#2a2110" stroke="#ffd46a"/>
+    <rect x="223" y="1050" width="52" height="20" fill="#2a2110" stroke="#ffd46a"/>
+    <rect x="291" y="1050" width="52" height="20" fill="#2a2110" stroke="#ffd46a"/>
+  </g>
+
+  <!-- 8 dissolve -->
+  <g class="ui">
+    <text x="714" y="868" class="panelTitle">B3｜企畫書原案：牆面逐格消失</text>
+    <text x="714" y="894" class="panelNote">像磚塊解體一樣逐格消失；全部消失後，全場變黑</text>
+    <rect x="714" y="918" width="492" height="170" fill="#070b10" stroke="#203846"/>
+    <g stroke="#465463" stroke-width="2">
+      <path d="M740 944 H1180 M740 974 H1180 M740 1004 H1180 M740 1034 H1180 M740 1064 H1180"/>
+      <path d="M770 920 V1088 M806 920 V1088 M842 920 V1088 M878 920 V1088 M914 920 V1088 M950 920 V1088 M986 920 V1088 M1022 920 V1088 M1058 920 V1088 M1094 920 V1088 M1130 920 V1088"/>
+    </g>
+    <g fill="#10151c">
+      <rect x="807" y="945" width="34" height="27"/><rect x="879" y="1005" width="34" height="27"/>
+      <rect x="987" y="975" width="34" height="27"/><rect x="1059" y="1035" width="34" height="27"/>
+      <rect x="1131" y="945" width="34" height="27"/>
+    </g>
+    <path d="M1150 938 l18 -14 M1150 938 l25 5 M1150 938 l7 22" stroke="#8396a6" stroke-width="2"/>
+    <text x="735" y="1078" class="ui tiny">CELL BY CELL → FULL BLACK</text>
+  </g>
+
+  <!-- 9 result -->
+  <g class="ui">
+    <text x="1316" y="868" class="panelTitle">B4｜修正提案：成績完成後才 RETURN</text>
+    <text x="1316" y="894" class="panelNote">全場遮罩與逐格消失完成後，Wall Left 淡入成績；最後才開放返回</text>
+    <rect x="1316" y="918" width="492" height="170" fill="#070b10" stroke="#203846"/>
+    <g opacity=".25">
+      <path d="M1328 930 H1800 M1328 954 H1800 M1328 978 H1800 M1328 1002 H1800 M1328 1026 H1800 M1328 1050 H1800" stroke="#314856"/>
+      <path d="M1352 918 V1088 M1392 918 V1088 M1432 918 V1088 M1472 918 V1088 M1512 918 V1088 M1552 918 V1088 M1592 918 V1088 M1632 918 V1088 M1672 918 V1088 M1712 918 V1088 M1752 918 V1088" stroke="#314856"/>
+    </g>
+    <rect x="1328" y="930" width="464" height="144" fill="#10202a" opacity=".62"/>
+    <text x="1350" y="930" class="ui" fill="#ffd46a" font-size="13" font-weight="800">FLOOR:</text>
+    <text x="1425" y="930" class="ui" fill="#ffd46a" font-size="17" font-weight="900">YOU WIN</text>
+    <rect x="1340" y="938" width="444" height="126" fill="#0d141b" stroke="#00ffe5" opacity=".9"/>
+    <text x="1562" y="963" text-anchor="middle" class="ui" fill="#e9f3f6" font-size="18" font-weight="900">THANK YOU FOR PLAYING</text>
+    <text x="1370" y="995" class="ui" fill="#9eb3bf" font-size="14" font-weight="700">時間</text>
+    <text x="1450" y="995" class="ui" fill="#00ffe5" font-size="20" font-weight="900">03:42</text>
+    <text x="1570" y="995" class="ui" fill="#9eb3bf" font-size="14" font-weight="700">標記地雷</text>
+    <text x="1685" y="995" class="ui" fill="#ffcf63" font-size="20" font-weight="900">120</text>
+    <text x="1370" y="1030" class="ui" fill="#9eb3bf" font-size="14" font-weight="700">揭露格</text>
+    <text x="1450" y="1030" class="ui" fill="#39ff14" font-size="20" font-weight="900">680</text>
+    <rect x="1650" y="1014" width="100" height="34" fill="#173e28" stroke="#39ff14"/>
+    <text x="1700" y="1037" text-anchor="middle" class="ui" fill="#d9f9df" font-size="14" font-weight="800">RETURN</text>
+  </g>
+
+  <text x="88" y="1158" class="ui tiny">操作補註（企畫書原案保留）：遊戲中僅保留 PAUSE / RESUME；不提供 ABORT；暫停仍持續計時，時間到即轉入 B1。</text>
+  <text x="88" y="1192" class="ui subtitle">本輪修正提案：後台負責啟動，Wall Left 保留為視覺波紋起點；前導完成後才接受 PLAY，超時後按 CONTINUE，結尾完成後才顯示 RETURN。</text>
+  <text x="88" y="1221" class="ui tiny">註：本圖只用於確認「企畫書原案」與「修正提案」的流程差異，尚未進入動畫資產、程式整合或現場製作。</text>
+</svg>

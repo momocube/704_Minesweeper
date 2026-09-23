@@ -7,12 +7,13 @@ const { app, BrowserWindow, ipcMain, screen, Menu } = require('electron');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const http = require('node:http');
+const net = require('node:net');
 const osc = require('osc');
 
-const SERVER_PORT = Number(process.env.PORT ?? 3000);
-const SERVER_URL = `http://localhost:${SERVER_PORT}`;
-const CONTROLLER_URL = `${SERVER_URL}/?face=all`;
-const PROJECTOR_URL = `${SERVER_URL}/?face=all&projector=1`;
+let serverPort = Number(process.env.PORT ?? 3000);
+let serverUrl = `http://localhost:${serverPort}`;
+let controllerUrl = `${serverUrl}/?face=all`;
+let projectorUrl = `${serverUrl}/?face=all&projector=1`;
 
 // TouchOSC / OSC control — same flow as 704_GenerativeArt (UDP listener in
 // Electron main), but on port 9001 so it doesn't clash with GA when both
@@ -32,6 +33,37 @@ function log(...a) { console.log('[electron]', ...a); }
 
 // ── Server child process ───────────────────────────────────────
 
+function isPortAvailable(port) {
+  return new Promise((resolve) => {
+    const probe = net.createServer();
+    probe.once('error', () => resolve(false));
+    probe.listen(port, '0.0.0.0', () => {
+      probe.close(() => resolve(true));
+    });
+  });
+}
+
+async function selectServerPort() {
+  const requestedPort = Number.isInteger(serverPort) && serverPort > 0 && serverPort < 65536
+    ? serverPort
+    : 3000;
+  const maxPort = Math.min(65535, requestedPort + 100);
+
+  for (let port = requestedPort; port <= maxPort; port++) {
+    if (!await isPortAvailable(port)) continue;
+    serverPort = port;
+    serverUrl = `http://localhost:${serverPort}`;
+    controllerUrl = `${serverUrl}/?face=all`;
+    projectorUrl = `${serverUrl}/?face=all&projector=1`;
+    if (serverPort !== requestedPort) {
+      log(`port ${requestedPort} busy, using ${serverPort}`);
+    }
+    return;
+  }
+
+  throw new Error(`no available server port in ${requestedPort}-${maxPort}`);
+}
+
 function spawnServer() {
   // Use Electron as Node via ELECTRON_RUN_AS_NODE so we don't need an external node binary
   // (works when packaged as portable exe).
@@ -40,7 +72,7 @@ function spawnServer() {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
-      PORT: String(SERVER_PORT),
+      PORT: String(serverPort),
     },
   });
   serverProcess.stdout.on('data', d => process.stdout.write(`[server] ${d}`));
@@ -59,7 +91,7 @@ function waitForServer(timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
     const start = Date.now();
     const tryPing = () => {
-      const req = http.get(`${SERVER_URL}/`, (res) => {
+      const req = http.get(`${serverUrl}/`, (res) => {
         res.resume();
         if (res.statusCode === 200) resolve();
         else retry();
@@ -123,7 +155,7 @@ function createControllerWindow() {
       backgroundThrottling: false,
     },
   });
-  controllerWindow.loadURL(CONTROLLER_URL);
+  controllerWindow.loadURL(controllerUrl);
   controllerWindow.once('ready-to-show', () => {
     if (!controllerWindow || controllerWindow.isDestroyed()) return;
     controllerWindow.show();
@@ -208,7 +240,7 @@ function openProjector({ displayId, windowed }) {
       backgroundThrottling: false,
     },
   });
-  projectorWindow.loadURL(PROJECTOR_URL);
+  projectorWindow.loadURL(projectorUrl);
 
   // ESC to close projector
   projectorWindow.webContents.on('before-input-event', (e, input) => {
@@ -337,8 +369,9 @@ if (!gotLock) {
 
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
-  spawnServer();
   try {
+    await selectServerPort();
+    spawnServer();
     await waitForServer();
     log('server ready, opening controller window');
   } catch (e) {

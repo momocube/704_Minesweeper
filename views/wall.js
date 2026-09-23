@@ -11,6 +11,28 @@ const FACE_NAMES = {
 const NUMBER_COLORS = ['', '#5b8dee', '#5dd97c', '#ff6b6b', '#c277ff',
                       '#ff9d4d', '#4dd0e1', '#f0f0f0', '#888'];
 const RED_WAVE_DURATION_MS = 1800;
+const INTRO_DURATION_MS = 10000;
+const IDLE_BG = '#121817';
+const IDLE_BAR_LINE = '#D3AF68';
+const IDLE_BAR_ACCENT = '#7C2D3A';
+const WIN_ENDING_DURATION_MS = 6200;
+const ENDING_DISSOLVE_START_S = 3.20;
+const ENDING_DISSOLVE_SPREAD_S = 0.50;
+const ENDING_DISSOLVE_DURATION_S = 1.8;
+const ENDING_RESULTS_START_S = 5.55;
+
+function animationDurationMs(state, key, fallback) {
+  const value = Number(state?.animationDurations?.[key]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function endingMaskAlpha(elapsedMs, totalMs) {
+  const start = totalMs * 0.38;
+  const full = totalMs * 0.50;
+  if (elapsedMs <= start) return 0;
+  if (elapsedMs >= full) return 0.86;
+  return 0.86 * ((elapsedMs - start) / Math.max(1, full - start));
+}
 
 export function init(faceParam) {
   const faceName = FACE_NAMES[faceParam];
@@ -24,7 +46,7 @@ export function init(faceParam) {
   root.style.display = 'flex';
   root.style.alignItems = 'center';
   root.style.justifyContent = 'center';
-  root.style.background = '#000';
+  root.style.background = IDLE_BG;
   const canvas = document.createElement('canvas');
   root.appendChild(canvas);
   const overlay = document.createElement('div');
@@ -37,6 +59,7 @@ export function init(faceParam) {
   let face = null;
   let myCells = [];
   let animStart = 0;
+  let nowMs = () => Date.now();
 
   function resize() {
     // 高畫質:canvas internal buffer = face native size (e.g. Wall Top 1408×640);
@@ -62,8 +85,17 @@ export function init(faceParam) {
   function updateOverlay() {
     if (!state) return;
     if (state.phase === 'idle') {
+      overlay.className = 'overlay idle-overlay';
+      overlay.innerHTML = '';
+    } else if (state.phase === 'armed') {
+      overlay.className = 'overlay idle-overlay';
+      overlay.innerHTML = '';
+    } else if (state.phase === 'intro') {
       overlay.className = 'overlay';
-      overlay.innerHTML = `<b>${faceName}</b> — 走到地板中央踩 PLAY`;
+      overlay.innerHTML = '';
+    } else if (state.phase === 'ready') {
+      overlay.className = 'overlay';
+      overlay.innerHTML = `<b>${faceName}</b> — 前導完成，走到地板踩 PLAY`;
     } else if (state.phase === 'tutorial' || state.phase === 'tutorialReady' || state.phase === 'countdown') {
       // The canvas is a fully designed standalone tutorial/countdown stage. An HTML overlay
       // would make it look layered again, so keep it completely empty here.
@@ -71,11 +103,21 @@ export function init(faceParam) {
       overlay.innerHTML = '';
     } else if (state.phase === 'gameOver') {
       overlay.className = 'overlay ' + (state.won ? 'win' : 'gameover');
-      overlay.innerHTML = state.won
-        ? '🎉 過關 — 走到地板踩重新開始'
-        : state.endReason === 'timeout'
-          ? '⏱ TIME OUT — 走到地板返回待機'
-          : '遊戲結束 — 走到地板返回待機';
+      if (state.won) {
+        overlay.innerHTML = state.endActionAt != null && nowMs() >= state.endActionAt
+          ? '🎉 成績畫面完成 — 走到地板 RETURN'
+          : '🎉 過關收尾播放中';
+      } else if (state.endReason === 'timeout' && state.endStage === 'timeout-wave') {
+        overlay.innerHTML = state.endActionAt != null && nowMs() >= state.endActionAt
+          ? '⏱ TIME OUT — 走到地板踩 CONTINUE'
+          : '⏱ TIME OUT — 紅色波紋播放中';
+      } else if (state.endReason === 'timeout' && state.endStage === 'timeout-ending') {
+        overlay.innerHTML = state.endActionAt != null && nowMs() >= state.endActionAt
+          ? '⏱ 結尾完成 — 走到地板 RETURN'
+          : '⏱ TIME OUT — 結尾動畫播放中';
+      } else {
+        overlay.innerHTML = '遊戲結束';
+      }
     } else {
       overlay.className = 'overlay';
       overlay.innerHTML = `<b>${faceName}</b> · ${face?.boardCols ?? '—'}×${face?.boardRows ?? '—'} · 💣 ${state.mineCount - state.flaggedCount}`;
@@ -90,15 +132,30 @@ export function init(faceParam) {
 
   function elapsedMs() {
     if (!state || state.gameStartMs == null) return 0;
-    const end = state.gameEndMs ?? Date.now();
+    const end = state.gameEndMs ?? nowMs();
     return end - state.gameStartMs;
   }
 
   function draw() {
     const W = canvas.width, H = canvas.height;
-    ctx.fillStyle = '#000';
+    ctx.fillStyle = IDLE_BG;
     ctx.fillRect(0, 0, W, H);
     if (!state || !face) return;
+
+    if (state.phase === 'idle') {
+      drawIdleStage(W, H);
+      return;
+    }
+
+    if (state.phase === 'armed') {
+      drawArmedStage(W, H);
+      return;
+    }
+
+    if (state.phase === 'intro') {
+      drawIntroFace(W, H);
+      return;
+    }
 
     // Tutorial is a standalone stage: do not paint cells/HUD first and cover
     // them later. This early return guarantees a clean canvas with no board bleed.
@@ -114,11 +171,18 @@ export function init(faceParam) {
       drawCountdown(W, H, state.countdownValue);
       return;
     }
+    if (state.phase === 'paused') {
+      drawPaused(W, H);
+      return;
+    }
 
     // canvas buffer 已經是 face native size → 直接畫,無 JS scale
     const cellPx = face.width / face.boardCols; // 64 venue px
+    const dissolve = state.gameOver && (state.won || state.endStage === 'timeout-ending');
     for (const cell of myCells) {
+      ctx.globalAlpha = dissolve ? endingCellAlpha(cell) : 1;
       drawCell(cell, cell.col * cellPx, cell.row * cellPx, cellPx);
+      ctx.globalAlpha = 1;
     }
 
     if (!state.gameOver && state.lockedCellId != null) {
@@ -131,9 +195,174 @@ export function init(faceParam) {
       }
     }
 
-    drawHud(cellPx);
-    if (state.gameOver && state.redWave && !state.won) drawRedWave(cellPx);
-    if (state.phase === 'gameOver' && state.endReason === 'timeout') drawTimeout(cellPx);
+    if (state.phase === 'playing' || state.phase === 'paused' || state.phase === 'gameOver') {
+      drawHud(cellPx);
+    }
+    if (state.redWave) drawRedWave(cellPx);
+    if (state.phase === 'gameOver' && state.endReason === 'timeout' &&
+        state.endStage === 'timeout-wave') drawTimeout(cellPx);
+    if (state.phase === 'gameOver' && state.endReason === 'timeout' &&
+        state.endStage === 'timeout-ending') drawTimeoutEnding();
+    if (state.phase === 'gameOver' && state.won) drawWinEnding();
+    if (state.phase === 'gameOver' && state.endReason === 'operator') drawOperatorEnding();
+  }
+
+  function drawIdleStage(W, H) {
+    ctx.fillStyle = IDLE_BG;
+    ctx.fillRect(0, 0, W, H);
+    drawStandbyParticles(W, H);
+  }
+
+  function drawArmedStage(W, H) {
+    ctx.fillStyle = IDLE_BG;
+    ctx.fillRect(0, 0, W, H);
+    drawStandbyParticles(W, H);
+    if (faceName !== 'Wall Left' || !state.startButton) return;
+    const button = state.startButton;
+    const cellSize = face.boardCols ? face.width / face.boardCols
+      : Math.min(button.width, button.height) / 3;
+    drawMineButton(button.x - face.originX, button.y - face.originY,
+      cellSize * 3, hudRotation(face.reservedSide));
+  }
+
+  function drawStandbyParticles(W, H) {
+    const t = nowMs() / 1000;
+    for (let i = 0; i < 12; i++) {
+      const x = ((i * 43 + 13) % 101) / 100 * W;
+      const baseY = ((i * 67 + 19) % 101) / 100 * H;
+      const y = baseY + Math.sin(t * (0.3 + (i % 4) * 0.05) + i) * Math.max(8, H * 0.025);
+      const radius = Math.max(1.5, Math.min(4, Math.min(W, H) * 0.008));
+      ctx.globalAlpha = 0.22 + (Math.sin(t * 0.8 + i) + 1) * 0.11;
+      ctx.fillStyle = i % 4 === 0 ? IDLE_BAR_ACCENT : IDLE_BAR_LINE;
+      ctx.shadowColor = ctx.fillStyle;
+      ctx.shadowBlur = Math.max(10, radius * 5);
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+
+  function drawMineButton(cx, cy, size, rotation = 0, revealedCenter = false, alpha = 1) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(rotation * Math.PI / 180);
+    const half = size / 2;
+    const tile = size / 3;
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = '#00ffe5';
+    ctx.shadowBlur = 22;
+    for (let row = 0; row < 3; row++) {
+      for (let col = 0; col < 3; col++) {
+        const x = -half + col * tile;
+        const y = -half + row * tile;
+        const center = row === 1 && col === 1;
+        const inset = Math.max(3, tile * 0.06);
+        ctx.fillStyle = center && revealedCenter
+          ? 'rgba(0,0,0,0.88)' : 'rgba(8,14,22,0.9)';
+        ctx.strokeStyle = center && revealedCenter
+          ? 'rgba(40,80,100,0.7)' : 'rgba(40,80,100,0.9)';
+        ctx.lineWidth = Math.max(1, tile * 0.025);
+        ctx.fillRect(x + inset, y + inset, tile - inset * 2, tile - inset * 2);
+        ctx.strokeRect(x + inset, y + inset, tile - inset * 2, tile - inset * 2);
+        if (center && revealedCenter) {
+          drawText('1', x + tile / 2, y + tile / 2, tile * 0.58, '#00ffe5', '700');
+        } else {
+          const corner = tile * 0.22;
+          ctx.strokeStyle = '#00ffe5';
+          ctx.lineWidth = Math.max(1.5, tile * 0.035);
+          ctx.beginPath();
+          ctx.moveTo(x + inset, y + inset + corner);
+          ctx.lineTo(x + inset, y + inset);
+          ctx.lineTo(x + inset + corner, y + inset);
+          ctx.moveTo(x + tile - inset - corner, y + inset);
+          ctx.lineTo(x + tile - inset, y + inset);
+          ctx.lineTo(x + tile - inset, y + inset + corner);
+          ctx.moveTo(x + inset, y + tile - inset - corner);
+          ctx.lineTo(x + inset, y + tile - inset);
+          ctx.lineTo(x + inset + corner, y + tile - inset);
+          ctx.moveTo(x + tile - inset - corner, y + tile - inset);
+          ctx.lineTo(x + tile - inset, y + tile - inset);
+          ctx.lineTo(x + tile - inset, y + tile - inset - corner);
+          ctx.stroke();
+        }
+      }
+    }
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  function drawIntroFace(W, H) {
+    const introDurationMs = animationDurationMs(state, 'intro', INTRO_DURATION_MS);
+    const elapsed = Math.max(0, Math.min(introDurationMs,
+      nowMs() - (state.introStartedAt ?? nowMs())));
+    const p = elapsed / introDurationMs;
+    ctx.fillStyle = '#02040a';
+    ctx.fillRect(0, 0, W, H);
+
+    // Keep a faint view of the actual face under the intro so the projection
+    // never reads as an empty black screen.
+    if (face.isBoard) {
+      ctx.globalAlpha = 0.34;
+      for (const cell of myCells) {
+        const cellPx = face.width / face.boardCols;
+        drawCell(cell, cell.col * cellPx, cell.row * cellPx, cellPx);
+      }
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = 'rgba(0,255,229,0.28)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(2, 2, W - 4, H - 4);
+    }
+
+    const origin = state.animationOrigins?.intro;
+    const cx = origin ? origin.x - face.originX : W / 2;
+    const cy = origin ? origin.y - face.originY : H / 2;
+    if (faceName === 'Wall Left' && state.startButton) {
+      const button = state.startButton;
+      const buttonAlpha = Math.max(0, Math.min(1, 1 - p / 0.46));
+      const cellSize = face.boardCols ? face.width / face.boardCols
+        : Math.min(button.width, button.height) / 3;
+      drawMineButton(button.x - face.originX, button.y - face.originY,
+        cellSize * 3, hudRotation(face.reservedSide), true, buttonAlpha);
+    }
+    [0, 0.12, 0.24].forEach((delay, i) => {
+      const ringP = Math.max(0, Math.min(1, (p - delay) / 0.76));
+      ctx.globalAlpha = ringP > 0 ? (1 - ringP) * 0.9 : 0;
+      ctx.strokeStyle = i === 2 ? '#00ffe5' : '#39ff14';
+      ctx.lineWidth = i === 0 ? 8 : 3;
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(18, ringP * 3840 * 0.80), 0, Math.PI * 2);
+      ctx.stroke();
+    });
+    ctx.globalAlpha = 1;
+
+    if (faceName === 'Wall Left') {
+      const alpha = Math.max(0, Math.min(1, (p - 0.43) / 0.08)) *
+        (p > 0.78 ? Math.max(0, 1 - (p - 0.78) / 0.22) : 1);
+      const rotation = hudRotation(face.reservedSide);
+      const rw = rotation === 0 || rotation === 180 ? W : H;
+      const rh = rotation === 0 || rotation === 180 ? H : W;
+      ctx.save();
+      ctx.translate(W / 2, H / 2);
+      ctx.rotate(rotation * Math.PI / 180);
+      ctx.translate(-rw / 2, -rh / 2);
+      ctx.globalAlpha = alpha;
+      drawText('CYBERCUBE', rw / 2, rh / 2 - 92, Math.min(rw * 0.12, 112), '#e8f9fc', '900');
+      drawText('MINESWEEPER', rw / 2, rh / 2 + 42, Math.min(rw * 0.09, 84), '#00ffe5', '900');
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+  }
+
+  function endingCellAlpha(cell) {
+    const start = state.won ? state.gameEndMs : state.endingStartedAt;
+    const elapsed = Math.max(0, (nowMs() - (start ?? nowMs())) / 1000);
+    const delay = ENDING_DISSOLVE_START_S +
+      ((cell.id * 37) % 100) / 100 * ENDING_DISSOLVE_SPREAD_S;
+    return elapsed <= delay ? 1
+      : Math.max(0, 1 - (elapsed - delay) / ENDING_DISSOLVE_DURATION_S);
   }
 
   function drawTutorialBackdrop(W, H) {
@@ -186,7 +415,7 @@ export function init(faceParam) {
       drawText('已進行時間',rw*.30,rh*.73,Math.min(rw*.027,29),'#e8f9fc','700');
       drawText('剩餘地雷估計',rw*.70,rh*.73,Math.min(rw*.027,29),'#e8f9fc','700');
     } else {
-      const items=[['Ⅱ','PAUSE','#ffb000'],['▶','RESUME','#39ff14'],['■','ABORT','#ff1744'],['⏏','STANDBY','#00ffe5']];
+      const items=[['Ⅱ','PAUSE','#ffb000'],['▶','RESUME','#39ff14']];
       items.forEach((it,i)=>{const x=rw*(.14+i*.24);drawText(it[0],x,rh*.45,Math.min(rw*.06,64),it[2],'900');drawText(it[1],x,rh*.64,Math.min(rw*.024,26),it[2],'800');});
     }
     ctx.restore();
@@ -348,6 +577,141 @@ export function init(faceParam) {
     ctx.restore();
   }
 
+  function drawPaused(W, H) {
+    ctx.fillStyle = 'rgba(2,4,10,0.92)';
+    ctx.fillRect(0, 0, W, H);
+    const rotation = hudRotation(face.reservedSide);
+    const rw = (rotation === 0 || rotation === 180) ? W : H;
+    const rh = (rotation === 0 || rotation === 180) ? H : W;
+    ctx.save();
+    ctx.translate(W / 2, H / 2);
+    ctx.rotate(rotation * Math.PI / 180);
+    ctx.translate(-rw / 2, -rh / 2);
+    drawText('PAUSED', rw / 2, rh * 0.35,
+      Math.min(rw * 0.10, rh * 0.20), '#ffb000', '900');
+    drawText('TIME CONTINUES', rw / 2, rh * 0.58,
+      Math.min(rw * 0.035, rh * 0.08), '#d9c18a', '700');
+    drawText('RESUME ON FLOOR', rw / 2, rh * 0.78,
+      Math.min(rw * 0.028, rh * 0.06), '#39ff14', '700');
+    ctx.restore();
+  }
+
+  function drawTimeoutEnding() {
+    const endingDurationMs = animationDurationMs(state, 'timeoutEnding', WIN_ENDING_DURATION_MS);
+    const elapsedMs = Math.max(0, nowMs() - (state.endingStartedAt ?? nowMs()));
+    const rotation = hudRotation(face.reservedSide);
+    const rw = (rotation === 0 || rotation === 180) ? canvas.width : canvas.height;
+    const rh = (rotation === 0 || rotation === 180) ? canvas.height : canvas.width;
+    ctx.save();
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate(rotation * Math.PI / 180);
+    ctx.translate(-rw / 2, -rh / 2);
+    const maskAlpha = endingMaskAlpha(elapsedMs, endingDurationMs);
+    if (maskAlpha > 0) {
+      ctx.fillStyle = `rgba(2,4,10,${maskAlpha})`;
+      ctx.fillRect(0, 0, rw, rh);
+    }
+    drawText('TIME OUT', rw / 2, rh * 0.40,
+      Math.min(rw * 0.12, rh * 0.22), '#ff1744', '900');
+    drawText('SESSION COMPLETE', rw / 2, rh * 0.62,
+      Math.min(rw * 0.035, rh * 0.08), '#ffd9de', '700');
+    if (faceName === 'Wall Left' && elapsedMs >= ENDING_RESULTS_START_S * 1000) {
+      const x = rw / 2, y = rh / 2;
+      ctx.fillStyle = 'rgba(7,13,22,0.96)';
+      ctx.strokeStyle = '#ff1744';
+      ctx.lineWidth = Math.max(2, rw * 0.006);
+      ctx.fillRect(x - rw * 0.39, y - rh * 0.25, rw * 0.78, rh * 0.50);
+      ctx.strokeRect(x - rw * 0.39, y - rh * 0.25, rw * 0.78, rh * 0.50);
+      drawText('TIME OUT', x, y - rh * 0.15,
+        Math.min(rw * 0.08, 52), '#ffd9de', '900');
+      drawText('THANK YOU FOR PLAYING', x, y - rh * 0.04,
+        Math.min(rw * 0.045, 30), '#ff1744', '700');
+      drawText(`TIME  ${fmtTime((state.gameEndMs ?? 0) - (state.gameStartMs ?? 0))}`,
+        x, y + rh * 0.08, Math.min(rw * 0.045, 30), '#ff1744', '700');
+      drawText(`MINES  ${String(state.flaggedCount).padStart(3, '0')}`,
+        x, y + rh * 0.17, Math.min(rw * 0.045, 30), '#ffd166', '700');
+    }
+    ctx.restore();
+  }
+
+  function drawWinEnding() {
+    const endingDurationMs = animationDurationMs(state, 'winEnding', WIN_ENDING_DURATION_MS);
+    const elapsedMs = Math.max(0, nowMs() - (state.endingStartedAt ??
+      state.gameEndMs ?? nowMs()));
+    const elapsed = elapsedMs / 1000;
+    if (elapsed < 2) {
+      const p = elapsed / 2;
+      ctx.globalAlpha = 1 - p;
+      ctx.strokeStyle = '#ffd166';
+      ctx.lineWidth = Math.max(4, canvas.width * 0.012);
+      ctx.beginPath();
+      ctx.arc(canvas.width / 2, canvas.height / 2,
+              Math.max(20, p * Math.max(canvas.width, canvas.height)), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    const maskAlpha = endingMaskAlpha(elapsedMs, endingDurationMs);
+    if (maskAlpha > 0) {
+      ctx.fillStyle = `rgba(2,4,10,${maskAlpha})`;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    drawText('YOU WIN', canvas.width / 2, canvas.height / 2 - 40,
+      Math.min(canvas.width * 0.13, canvas.height * 0.12), '#ffd166', '900');
+
+    if (faceName === 'Wall Left' && elapsedMs >= ENDING_RESULTS_START_S * 1000) {
+      const rotation = hudRotation(face.reservedSide);
+      const rw = (rotation === 0 || rotation === 180) ? canvas.width : canvas.height;
+      const rh = (rotation === 0 || rotation === 180) ? canvas.height : canvas.width;
+      ctx.save();
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(rotation * Math.PI / 180);
+      ctx.translate(-rw / 2, -rh / 2);
+      const x = rw / 2, y = rh / 2;
+      ctx.fillStyle = 'rgba(7,13,22,0.96)';
+      ctx.strokeStyle = '#00ffe5';
+      ctx.lineWidth = Math.max(2, rw * 0.006);
+      ctx.fillRect(x - rw * 0.39, y - rh * 0.25, rw * 0.78, rh * 0.50);
+      ctx.strokeRect(x - rw * 0.39, y - rh * 0.25, rw * 0.78, rh * 0.50);
+      drawText('THANK YOU FOR PLAYING', x, y - rh * 0.15,
+        Math.min(rw * 0.08, 52), '#e8f9fc', '900');
+      drawText(`TIME  ${fmtTime((state.gameEndMs ?? 0) - (state.gameStartMs ?? 0))}`,
+        x, y - rh * 0.02, Math.min(rw * 0.045, 30), '#00ffe5', '700');
+      drawText(`MINES  ${String(state.flaggedCount).padStart(3, '0')}`,
+        x, y + rh * 0.08, Math.min(rw * 0.045, 30), '#ffd166', '700');
+      ctx.restore();
+    }
+  }
+
+  function drawOperatorEnding() {
+    if (faceName !== 'Wall Left') return;
+    const rotation = hudRotation(face.reservedSide);
+    const rw = (rotation === 0 || rotation === 180) ? canvas.width : canvas.height;
+    const rh = (rotation === 0 || rotation === 180) ? canvas.height : canvas.width;
+    const elapsed = state.gameStartMs != null && state.gameEndMs != null
+      ? Math.max(0, state.gameEndMs - state.gameStartMs) : 0;
+    const totalSafe = state.cells.length - state.mineCount;
+    ctx.save();
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate(rotation * Math.PI / 180);
+    ctx.translate(-rw / 2, -rh / 2);
+    ctx.fillStyle = 'rgba(7,13,22,0.96)';
+    ctx.strokeStyle = '#4DA3FF';
+    ctx.lineWidth = Math.max(2, rw * 0.006);
+    ctx.fillRect(rw * 0.11, rh * 0.25, rw * 0.78, rh * 0.50);
+    ctx.strokeRect(rw * 0.11, rh * 0.25, rw * 0.78, rh * 0.50);
+    drawText('GAME ENDED', rw / 2, rh * 0.35,
+      Math.min(rw * 0.08, 52), '#DFF5FA', '900');
+    drawText('THANK YOU FOR PLAYING', rw / 2, rh * 0.46,
+      Math.min(rw * 0.045, 30), '#4DA3FF', '700');
+    drawText(`TIME  ${fmtTime(elapsed)}`, rw / 2, rh * 0.58,
+      Math.min(rw * 0.045, 30), '#4DA3FF', '700');
+    drawText(`MINES  ${String(state.flaggedCount).padStart(3, '0')}`, rw / 2, rh * 0.67,
+      Math.min(rw * 0.045, 30), '#FFD166', '700');
+    drawText(`SAFE   ${state.revealedCount}/${totalSafe}`, rw / 2, rh * 0.76,
+      Math.min(rw * 0.045, 30), '#39FF14', '700');
+    ctx.restore();
+  }
+
   function drawHud(cellPx) {
     const rect = hudRect(face, cellPx);
     const rotation = hudRotation(face.reservedSide);
@@ -438,10 +802,12 @@ export function init(faceParam) {
   }
 
   function drawRedWave(cellPx) {
-    if (!animStart) return;
+    if (!state.redWave) return;
     const maxDist = state.redWave[state.redWave.length - 1]?.dist || 1;
-    const elapsed = performance.now() - animStart;
-    const reachDist = Math.min(1, elapsed / RED_WAVE_DURATION_MS) * maxDist;
+    const waveDurationMs = animationDurationMs(state, 'redWave', RED_WAVE_DURATION_MS);
+    const elapsed = Math.max(0, nowMs() -
+      (state.redWaveStartedAt ?? state.gameEndMs ?? nowMs()));
+    const reachDist = Math.min(1, elapsed / waveDurationMs) * maxDist;
     for (const w of state.redWave) {
       if (w.dist > reachDist) break;
       if (w.faceName !== faceName) continue;
@@ -484,6 +850,40 @@ export function init(faceParam) {
       indexCells();
       updateOverlay();
     },
+    onIntro: ({ snapshot }) => {
+      state = snapshot;
+      animStart = 0;
+      indexCells();
+      updateOverlay();
+    },
+    onArmed: ({ snapshot }) => {
+      state = snapshot;
+      animStart = 0;
+      indexCells();
+      updateOverlay();
+      resize();
+    },
+    onEndingStart: ({ snapshot }) => {
+      state = snapshot;
+      animStart = 0;
+      indexCells();
+      updateOverlay();
+    },
+    onFreeze: ({ redWave, redWaveStartedAt, cells }) => {
+      if (!state) return;
+      for (const c of cells || []) {
+        if (c.faceName !== faceName) continue;
+        const idx = myCells.findIndex(x => x.id === c.id);
+        if (idx >= 0) myCells[idx] = c;
+      }
+      state.redWave = redWave || null;
+      state.redWaveStartedAt = redWaveStartedAt ?? Date.now();
+    },
+    onUnfreeze: () => {
+      if (!state) return;
+      state.redWave = null;
+      state.redWaveStartedAt = null;
+    },
     onGameOver: ({ snapshot }) => {
       state = snapshot;
       animStart = performance.now();
@@ -502,8 +902,20 @@ export function init(faceParam) {
       indexCells();
       updateOverlay();
     },
+    onPause: ({ snapshot }) => {
+      state = snapshot;
+      indexCells();
+      updateOverlay();
+    },
+    onResume: ({ snapshot }) => {
+      state = snapshot;
+      indexCells();
+      updateOverlay();
+    },
   });
+  nowMs = () => client.now();
 
+  setInterval(updateOverlay, 250);
   resize();
   function loop() {
     draw();

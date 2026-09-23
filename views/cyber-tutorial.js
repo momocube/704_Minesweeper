@@ -5,7 +5,7 @@ const TUTORIAL_MAIN_FACES = new Set([
   "Wall Top", "Wall Left", "Wall Button", "Wall Right Big",
 ]);
 
-function TutorialWallOverlay({ state, faces, palette }) {
+function TutorialWallOverlay({ state, faces, palette, nowMs = () => Date.now() }) {
   const tutorial = state?.phase === 'tutorial';
   const ready = state?.phase === 'tutorialReady';
   const countdown = state?.phase === 'countdown';
@@ -20,6 +20,86 @@ function TutorialWallOverlay({ state, faces, palette }) {
       ) : (
         <TutorialAmbientFace key={face.name} face={face} palette={palette}/>
       ))}
+      {tutorial && state.tutorialTransitionStartedAt != null && (
+        <TutorialTransitionOverlay state={state} faces={faces}
+          palette={palette} nowMs={nowMs}/>
+      )}
+    </g>
+  );
+}
+
+function TutorialTransitionOverlay({ state, faces, palette, nowMs }) {
+  const durationMs = Math.max(1, Number(
+    state.tutorialTransitionDurationMs ||
+    state.animationDurations?.tutorialTransition ||
+    6000,
+  ));
+  const durationS = durationMs / 1000;
+  const elapsedS = Math.max(0, Math.min(durationS,
+    (nowMs() - state.tutorialTransitionStartedAt) / 1000));
+  const negativeDelay = `${-elapsedS}s`;
+  const transitionFaces = faces.filter(face => TUTORIAL_MAIN_FACES.has(face.name));
+
+  return (
+    <g className="tutorial-transition-overlay" pointerEvents="none">
+      <style>{`
+        .tutorial-transition-curtain {
+          animation: tutorialTransitionCurtain ${durationS}s ease-in-out 1 both;
+        }
+        .tutorial-transition-title {
+          animation: tutorialTransitionTitle ${durationS}s ease-out 1 both;
+        }
+        @keyframes tutorialTransitionCurtain {
+          0% { opacity: 0; }
+          18% { opacity: 1; }
+          50% { opacity: 1; }
+          78% { opacity: .90; }
+          100% { opacity: 0; }
+        }
+        @keyframes tutorialTransitionTitle {
+          0% { opacity: 0; }
+          50% { opacity: 0; }
+          60% { opacity: 1; }
+          82% { opacity: 1; }
+          100% { opacity: 0; }
+        }
+      `}</style>
+      {transitionFaces.map(face => {
+        const rotation = faceContentRotation(face.reservedSide);
+        const readableW = (rotation === 0 || rotation === 180)
+          ? face.width : face.height;
+        const readableH = (rotation === 0 || rotation === 180)
+          ? face.height : face.width;
+        const gradientId = `tutorial-transition-${face.id}`;
+        const cx = face.originX + face.width / 2;
+        const cy = face.originY + face.height / 2;
+        return (
+          <g key={face.name}
+            transform={`translate(${cx},${cy}) rotate(${rotation})`}>
+            <defs>
+              <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stopColor={palette.primary} stopOpacity=".96"/>
+                <stop offset="50%" stopColor="#02040A" stopOpacity=".98"/>
+                <stop offset="100%" stopColor={palette.accent} stopOpacity=".90"/>
+              </linearGradient>
+            </defs>
+            <rect className="tutorial-transition-curtain"
+              x={-readableW / 2} y={-readableH / 2}
+              width={readableW} height={readableH}
+              fill={`url(#${gradientId})`}
+              style={{animationDelay: negativeDelay}}/>
+            <text className="tutorial-transition-title"
+              x={0} y={0} textAnchor="middle" dominantBaseline="central"
+              fontFamily="Orbitron" fontSize={Math.min(112, readableW * 0.12)}
+              fontWeight={900} letterSpacing=".18em"
+              fill="#F4F7FF"
+              style={{animationDelay: negativeDelay,
+                filter: `drop-shadow(0 0 20px ${palette.primary})`}}>
+              TUTORIAL
+            </text>
+          </g>
+        );
+      })}
     </g>
   );
 }
@@ -388,9 +468,8 @@ function TutorialHud({ palette }) {
 
 function TutorialButtons({ palette }) {
   const buttons = [
-    { x: 78, color: palette.warn, glyph: 'Ⅱ', title: 'PAUSE', zh: '暫停遊戲與計時' },
+    { x: 78, color: palette.warn, glyph: 'Ⅱ', title: 'PAUSE', zh: '暫停操作，時間照常' },
     { x: 408, color: palette.accent, glyph: '▶', title: 'RESUME', zh: '踩內圈繼續' },
-    { x: 738, color: palette.danger, glyph: '■', title: 'ABORT', zh: '踩外環放棄本局' },
     { x: 1068, color: palette.primary, glyph: '⏏', title: 'STANDBY', zh: '結束後回到待機' },
   ];
   return (

@@ -4,6 +4,48 @@ const NUMBER_COLORS = ['', '#5b8dee', '#5dd97c', '#ff6b6b', '#c277ff', '#ff9d4d'
 const FLOOR_BTN = 50;
 const RED_WAVE_DURATION_MS = 1800;
 const RESTART_DELAY_AFTER_WAVE_MS = 400;
+const INTRO_DURATION_MS = 10000;
+const IDLE_BG = '#121817';
+const IDLE_BAR_LINE = '#D3AF68';
+const IDLE_BAR_ACCENT = '#7C2D3A';
+const IDLE_BAR_BLUE = '#5B86B8';
+const IDLE_BAR_TEXT = '#F4E5C0';
+const WIN_ENDING_DURATION_MS = 6200;
+const ENDING_DISSOLVE_START_S = 3.20;
+const ENDING_DISSOLVE_SPREAD_S = 0.50;
+const ENDING_DISSOLVE_DURATION_S = 1.8;
+const ENDING_RESULTS_START_S = 5.55;
+const RESULT_PANEL_W = 560;
+const RESULT_PANEL_H = 620;
+
+function animationDurationMs(state, key, fallback) {
+  const value = Number(state?.animationDurations?.[key]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function waveCellSize(face) {
+  const cols = face?.boardCols > 0
+    ? face.boardCols
+    : Math.floor(Number(face?.colCount || 0) / 2);
+  const rows = face?.boardRows > 0
+    ? face.boardRows
+    : Math.floor(Number(face?.rowCount || 0) / 4);
+  if (cols > 0 && rows > 0) {
+    return [face.width / cols, face.height / rows];
+  }
+  return [
+    Number(face?.cellPxW) || face.width / Math.max(1, face?.colCount || 1),
+    Number(face?.cellPxH) || face.height / Math.max(1, face?.rowCount || 1),
+  ];
+}
+
+function endingMaskAlpha(elapsedMs, totalMs) {
+  const start = totalMs * 0.38;
+  const full = totalMs * 0.50;
+  if (elapsedMs <= start) return 0;
+  if (elapsedMs >= full) return 0.84;
+  return 0.84 * ((elapsedMs - start) / Math.max(1, full - start));
+}
 
 const URL_PARAMS = new URLSearchParams(location.search);
 const PROJECTOR_MODE = URL_PARAMS.get('projector') === '1';
@@ -53,6 +95,7 @@ export function init() {
   let floorPulse = null;
   let animStart = 0;
   let maxWaveDist = 1;
+  let nowMs = () => Date.now();
 
   function resize() {
     // 高畫質策略:canvas 內部 buffer 永遠是 venue 原生 2688×3840;
@@ -193,7 +236,7 @@ export function init() {
 
   function elapsedMs() {
     if (!state || state.gameStartMs == null) return 0;
-    const end = state.gameEndMs ?? Date.now();
+    const end = state.gameEndMs ?? nowMs();
     return end - state.gameStartMs;
   }
 
@@ -207,13 +250,243 @@ export function init() {
       return;
     }
 
+    if (state.phase === 'idle') {
+      drawIdleStage(W, H);
+      return;
+    }
+
+    if (state.phase === 'armed') {
+      drawArmedStage(W, H);
+      return;
+    }
+
+    if (state.phase === 'intro') {
+      drawIntroStage();
+      return;
+    }
+
     // 全部在 native venue 2688×3840 coords 上畫(no transform)
     for (const face of state.faces) drawFace(face);
     if (!state.gameOver && state.lockedCellId != null) drawLockedHighlight();
-    if (state.gameOver && state.redWave && !state.won) drawRedWave();
-    if (state.phase === 'gameOver' && state.endReason === 'timeout') drawTimeoutOnWalls();
+    if (state.redWave) drawRedWave();
+    if (state.phase === 'paused') drawPausedOverlay();
+    if (state.phase === 'gameOver' && state.endReason === 'timeout' &&
+        state.endStage === 'timeout-wave') drawTimeoutOnWalls();
+    if (state.phase === 'gameOver' && state.won) drawWinEnding();
+    if (state.phase === 'gameOver' && state.endReason === 'timeout' &&
+        state.endStage === 'timeout-ending') drawTimeoutEnding();
+    if (state.phase === 'gameOver' && state.endReason === 'operator') drawOperatorEnding();
 
     drawFloorOverlay();
+  }
+
+  function drawIdleStage(W, H) {
+    ctx.fillStyle = IDLE_BG;
+    ctx.fillRect(0, 0, W, H);
+    drawIdleVenueMap(W, H);
+    drawStandbyParticles(W, H);
+  }
+
+  function drawArmedStage(W, H) {
+    ctx.fillStyle = IDLE_BG;
+    ctx.fillRect(0, 0, W, H);
+    drawStandbyParticles(W, H);
+    const button = state.startButton;
+    if (button) {
+      const face = state.faces.find(f => f.name === button.faceName);
+      const rotation = face ? hudRotation(face.reservedSide) : 0;
+      const cellSize = face?.boardCols
+        ? face.width / face.boardCols
+        : Math.min(button.width, button.height) / 3;
+      drawMineButton(button.x, button.y, cellSize * 3, rotation);
+    }
+  }
+
+  function drawStandbyParticles(W, H) {
+    const t = nowMs() / 1000;
+    for (let i = 0; i < 30; i++) {
+      const x = ((i * 37 + 11) % 101) / 100 * W;
+      const baseY = ((i * 61 + 17) % 101) / 100 * H;
+      const y = baseY + Math.sin(t * (0.35 + (i % 5) * 0.04) + i) * 18;
+      const alpha = 0.20 + (Math.sin(t * 0.7 + i * 1.7) + 1) * 0.12;
+      const radius = 1.5 + (i % 3) * 0.8;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = i % 4 === 0 ? IDLE_BAR_ACCENT : IDLE_BAR_LINE;
+      ctx.shadowColor = ctx.fillStyle;
+      ctx.shadowBlur = 14;
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+
+  function drawIdleVenueMap(W, H) {
+    const faces = state.faces || [];
+    const primary = IDLE_BAR_LINE;
+    const accent = IDLE_BAR_BLUE;
+    const secondary = IDLE_BAR_ACCENT;
+    ctx.save();
+    ctx.globalAlpha = 0.78;
+    ctx.strokeStyle = primary;
+    ctx.lineWidth = 4;
+    ctx.setLineDash([28, 20]);
+    ctx.stroke(new Path2D('M640 0H2048V640H2688V2688H2048V3328H640V2688H0V640H640Z'));
+    ctx.setLineDash([]);
+
+    for (const face of faces) {
+      const isEntrance = face.name === 'Entrance';
+      ctx.fillStyle = isEntrance ? 'rgba(27,36,33,0.38)' : 'rgba(27,36,33,0.72)';
+      ctx.fillRect(face.originX, face.originY, face.width, face.height);
+      ctx.strokeStyle = isEntrance ? 'rgba(90,120,140,0.36)' : primary;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(face.originX, face.originY, face.width, face.height);
+      ctx.strokeStyle = primary;
+      ctx.globalAlpha = 0.25;
+      ctx.setLineDash([10, 18]);
+      ctx.strokeRect(face.originX + 14, face.originY + 14,
+        Math.max(0, face.width - 28), Math.max(0, face.height - 28));
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 0.72;
+      const x = face.originX, y = face.originY, w = face.width, h = face.height;
+      const corner = Math.min(56, Math.min(w, h) * 0.18);
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(x, y + corner); ctx.lineTo(x, y); ctx.lineTo(x + corner, y);
+      ctx.moveTo(x + w - corner, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + corner);
+      ctx.moveTo(x, y + h - corner); ctx.lineTo(x, y + h); ctx.lineTo(x + corner, y + h);
+      ctx.moveTo(x + w - corner, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - corner);
+      ctx.stroke();
+      drawText(face.isFloor ? '704 BAR FLOOR' : (face.id || face.name),
+        x + w / 2, y + h / 2, face.isFloor ? 42 : 28, primary, '900');
+    }
+
+    ctx.globalAlpha = 0.68;
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 5;
+    ctx.setLineDash([12, 40]);
+    ctx.stroke(new Path2D('M84 720H604V84H2084V720H2604V2604H2084V3244H604V2604H84Z'));
+    ctx.setLineDash([]);
+
+    const joints = [[640, 640], [2048, 640], [640, 2688], [2048, 2688]];
+    const t = nowMs() / 1000;
+    joints.forEach(([x, y], i) => {
+      const pulse = 0.88 + Math.sin(t * 2.8 + i) * 0.18;
+      ctx.globalAlpha = 0.75;
+      ctx.fillStyle = 'rgba(4,12,20,0.9)';
+      ctx.beginPath(); ctx.arc(x, y, 24, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = primary; ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.globalAlpha = pulse;
+      ctx.fillStyle = i % 2 ? accent : secondary;
+      ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.fill();
+    });
+
+    const start = state.startButton;
+    if (start) {
+      ctx.globalAlpha = 0.65 + Math.sin(t * 2.4) * 0.25;
+      ctx.strokeStyle = secondary;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 12]);
+      ctx.beginPath(); ctx.arc(start.x, start.y, 74, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = secondary;
+      ctx.beginPath(); ctx.arc(start.x, start.y, 12, 0, Math.PI * 2); ctx.fill();
+    }
+
+    ctx.globalAlpha = 0.72 + Math.sin(t * 1.25) * 0.16;
+    drawText('704 / BAR FLOORPLAN', W / 2, H / 2 - 34, 34, IDLE_BAR_TEXT, '900');
+    drawText('EXTERNAL STANDBY · BAR LIGHTS', W / 2, H / 2 + 10, 16, primary, '700');
+    ctx.strokeStyle = primary;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(W / 2 - 260, H / 2 + 42); ctx.lineTo(W / 2 + 260, H / 2 + 42); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawIntroStage() {
+    const W = canvas.width, H = canvas.height;
+    const introDurationMs = animationDurationMs(state, 'intro', INTRO_DURATION_MS);
+    const elapsed = Math.max(0, Math.min(introDurationMs,
+      nowMs() - (state.introStartedAt ?? nowMs())));
+    const p = elapsed / introDurationMs;
+    ctx.fillStyle = '#02040a';
+    ctx.fillRect(0, 0, W, H);
+
+    // Reveal the existing venue scene during the last part of the intro so
+    // the transition into ready is a fade, not a hard cut.
+    for (const face of state.faces) drawFace(face);
+
+    for (const face of state.faces) {
+      ctx.strokeStyle = face.name === 'Entrance' ? '#263340' : '#00ffe5';
+      ctx.globalAlpha = face.name === 'Entrance' ? 0.25 : 0.34;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(face.originX + 8, face.originY + 8, face.width - 16, face.height - 16);
+    }
+    ctx.globalAlpha = 1;
+
+    const floor = state.faces.find(f => f.isFloor);
+    const origin = state.animationOrigins?.intro;
+    const ox = origin?.x ?? (floor ? floor.originX + floor.width / 2 : W / 2);
+    const oy = origin?.y ?? (floor ? floor.originY + floor.height / 2 : H / 2);
+    const maxR = Math.max(W, H) * 0.78;
+    [0, 0.12, 0.24].forEach((delay, i) => {
+      const ringP = Math.max(0, Math.min(1, (p - delay) / 0.76));
+      const radius = Math.max(20, ringP * maxR);
+      ctx.strokeStyle = i === 2 ? '#00ffe5' : '#39ff14';
+      ctx.globalAlpha = ringP > 0 ? (1 - ringP) * 0.85 : 0;
+      ctx.lineWidth = i === 0 ? 9 : 4;
+      ctx.beginPath();
+      ctx.arc(ox, oy, radius, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+    ctx.globalAlpha = 1;
+
+    const titleAlpha = Math.max(0, Math.min(1, (p - 0.43) / 0.08)) *
+      (p > 0.78 ? Math.max(0, 1 - (p - 0.78) / 0.22) : 1);
+    const titleFace = state.faces.find(f => f.name === 'Wall Left');
+    const titleRotation = titleFace ? hudRotation(titleFace.reservedSide) : 0;
+    const titleW = titleFace
+      ? (titleRotation === 0 || titleRotation === 180 ? titleFace.width : titleFace.height)
+      : W;
+    const titleH = titleFace
+      ? (titleRotation === 0 || titleRotation === 180 ? titleFace.height : titleFace.width)
+      : H;
+    const titleX = titleFace ? titleFace.originX + titleFace.width / 2 : W / 2;
+    const titleY = titleFace ? titleFace.originY + titleFace.height / 2 : H / 2;
+    const trigger = state.startButton;
+    const triggerAlpha = trigger
+      ? Math.max(0, Math.min(1, 1 - p / 0.46))
+      : 0;
+    if (trigger && triggerAlpha > 0) {
+      const triggerFace = state.faces.find(f => f.name === trigger.faceName);
+      const triggerCellSize = triggerFace?.boardCols
+        ? triggerFace.width / triggerFace.boardCols
+        : Math.min(trigger.width, trigger.height) / 3;
+      drawMineButton(trigger.x, trigger.y,
+        triggerCellSize * 3, titleRotation, true, triggerAlpha);
+    }
+    ctx.save();
+    ctx.translate(titleX, titleY);
+    ctx.rotate(titleRotation * Math.PI / 180);
+    ctx.translate(-titleW / 2, -titleH / 2);
+    ctx.globalAlpha = titleAlpha;
+    drawText('CYBERCUBE', titleW / 2, titleH / 2 - 92,
+      Math.min(112, titleW * 0.12, titleH * 0.22), '#e8f9fc', '900');
+    drawText('MINESWEEPER', titleW / 2, titleH / 2 + 42,
+      Math.min(84, titleW * 0.09, titleH * 0.17), '#00ffe5', '900');
+    drawText('FIELD INITIALIZING · 704', titleW / 2, titleH / 2 + 150,
+      Math.min(18, titleW * 0.025, titleH * 0.045), '#9ab0bc', '700');
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    const playAlpha = Math.max(0, Math.min(1, (p - 0.86) / 0.14));
+    if (floor && playAlpha > 0) {
+      ctx.globalAlpha = playAlpha;
+      drawCenterButton(floor.originX + floor.width / 2,
+        floor.originY + floor.height / 2, 'play');
+      ctx.globalAlpha = 1;
+    }
   }
 
   function drawFace(face) {
@@ -236,7 +509,7 @@ export function init() {
         drawText('Floor', face.width/2, face.height/2 - 60, 80, '#222');
         drawText('左半 = 🚩    右半 = ⛏', face.width/2, face.height/2 + 40, 56, '#1c1c20');
       } else {
-        // idle / gameOver — dim, button is drawn as overlay
+        // idle / ready / gameOver — dim, controls are drawn as overlays only
         ctx.fillStyle = 'rgba(0,0,0,0.4)';
         ctx.fillRect(0, 0, face.width, face.height);
       }
@@ -247,7 +520,9 @@ export function init() {
         ctx.fillStyle = '#0a0a0a';
         ctx.fillRect(0, 0, face.width, face.height);
         drawBoard(face);
-        drawHud(face);
+        if (state.phase === 'playing' || state.phase === 'paused' || state.phase === 'gameOver') {
+          drawHud(face);
+        }
       }
     }
 
@@ -262,8 +537,21 @@ export function init() {
     const cellPx = face.width / face.boardCols; // === face.height / face.boardRows === 64
     const myCells = state.cells.filter(c => c.faceName === face.name);
     for (const cell of myCells) {
+      const fade = state.gameOver && (state.won || state.endStage === 'timeout-ending')
+        ? endingCellAlpha(cell) : 1;
+      ctx.globalAlpha = fade;
       drawCell(cell, cell.col * cellPx, cell.row * cellPx, cellPx);
+      ctx.globalAlpha = 1;
     }
+  }
+
+  function endingCellAlpha(cell) {
+    const start = state.won ? state.gameEndMs : state.endingStartedAt;
+    const elapsed = Math.max(0, (nowMs() - (start ?? nowMs())) / 1000);
+    const delay = ENDING_DISSOLVE_START_S +
+      ((cell.id * 37) % 100) / 100 * ENDING_DISSOLVE_SPREAD_S;
+    return elapsed <= delay ? 1
+      : Math.max(0, 1 - (elapsed - delay) / ENDING_DISSOLVE_DURATION_S);
   }
 
   function drawHud(face) {
@@ -365,6 +653,56 @@ export function init() {
     }
   }
 
+  function drawMineButton(cx, cy, size, rotation = 0, revealedCenter = false, alpha = 1) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(rotation * Math.PI / 180);
+    const half = size / 2;
+    const tile = size / 3;
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = '#00ffe5';
+    ctx.shadowBlur = 22;
+    for (let row = 0; row < 3; row++) {
+      for (let col = 0; col < 3; col++) {
+        const x = -half + col * tile;
+        const y = -half + row * tile;
+        const center = row === 1 && col === 1;
+        const inset = Math.max(3, tile * 0.06);
+        ctx.fillStyle = center && revealedCenter
+          ? 'rgba(0,0,0,0.88)' : 'rgba(8,14,22,0.9)';
+        ctx.strokeStyle = center && revealedCenter
+          ? 'rgba(40,80,100,0.7)' : 'rgba(40,80,100,0.9)';
+        ctx.lineWidth = Math.max(1, tile * 0.025);
+        ctx.fillRect(x + inset, y + inset, tile - inset * 2, tile - inset * 2);
+        ctx.strokeRect(x + inset, y + inset, tile - inset * 2, tile - inset * 2);
+        if (center && revealedCenter) {
+          drawText('1', x + tile / 2, y + tile / 2, tile * 0.58, '#00ffe5', '700');
+        } else {
+          const corner = tile * 0.22;
+          ctx.strokeStyle = '#00ffe5';
+          ctx.lineWidth = Math.max(1.5, tile * 0.035);
+          ctx.beginPath();
+          ctx.moveTo(x + inset, y + inset + corner);
+          ctx.lineTo(x + inset, y + inset);
+          ctx.lineTo(x + inset + corner, y + inset);
+          ctx.moveTo(x + tile - inset - corner, y + inset);
+          ctx.lineTo(x + tile - inset, y + inset);
+          ctx.lineTo(x + tile - inset, y + inset + corner);
+          ctx.moveTo(x + inset, y + tile - inset - corner);
+          ctx.lineTo(x + inset, y + tile - inset);
+          ctx.lineTo(x + inset + corner, y + tile - inset);
+          ctx.moveTo(x + tile - inset - corner, y + tile - inset);
+          ctx.lineTo(x + tile - inset, y + tile - inset);
+          ctx.lineTo(x + tile - inset, y + tile - inset - corner);
+          ctx.stroke();
+        }
+      }
+    }
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
   function drawLockedHighlight() {
     const cell = state.cells[state.lockedCellId];
     const face = state.faces.find(f => f.name === cell.faceName);
@@ -378,21 +716,23 @@ export function init() {
   }
 
   function drawRedWave() {
-    if (!state.redWave || !animStart) return;
-    const elapsed = performance.now() - animStart;
-    const progress = Math.min(1, elapsed / RED_WAVE_DURATION_MS);
+    if (!state.redWave) return;
+    const waveDurationMs = animationDurationMs(state, 'redWave', RED_WAVE_DURATION_MS);
+    const elapsed = Math.max(0, nowMs() -
+      (state.redWaveStartedAt ?? state.gameEndMs ?? nowMs()));
+    const progress = Math.min(1, elapsed / waveDurationMs);
     const reachDist = progress * maxWaveDist;
-    const CELL_PX = 64;
     for (const w of state.redWave) {
       if (w.dist > reachDist) break;
       const face = state.faces.find(f => f.name === w.faceName);
       if (!face) continue;
-      const x = face.originX + w.col * CELL_PX;
-      const y = face.originY + w.row * CELL_PX;
+      const [cellW, cellH] = waveCellSize(face);
+      const x = face.originX + w.col * cellW;
+      const y = face.originY + w.row * cellH;
       const lead = reachDist - w.dist;
-      const fade = Math.min(1, lead / 50);
+      const fade = Math.min(1, lead / Math.max(cellW, cellH));
       ctx.fillStyle = `rgba(255, ${Math.floor(40 * (1 - fade))}, ${Math.floor(40 * (1 - fade))}, ${0.85 * fade})`;
-      ctx.fillRect(x, y, CELL_PX, CELL_PX);
+      ctx.fillRect(x, y, cellW, cellH);
     }
   }
 
@@ -436,7 +776,7 @@ export function init() {
     if(step===0){drawModeCards(rw,rh);}
     else if(step===1){drawText('▦  中央揭露  2',rw/2,rh*.51,Math.min(58,rw*.055),'#39ff14','900');drawText('數字＝周圍 8 格的地雷數',rw/2,rh*.70,Math.min(28,rw*.028),'#e8f9fc','700');}
     else if(step===2){drawText('T.UPTIME  01:24',rw*.28,rh*.52,Math.min(48,rw*.046),'#00ffe5','900');drawText('THREAT  120',rw*.72,rh*.52,Math.min(48,rw*.046),'#ff1744','900');}
-    else{drawText('Ⅱ PAUSE   ▶ RESUME   ■ ABORT   ⏏ STANDBY',rw/2,rh*.54,Math.min(34,rw*.031),'#ffb000','800');}
+    else{drawText('Ⅱ PAUSE   ▶ RESUME',rw/2,rh*.54,Math.min(34,rw*.031),'#ffb000','800');}
     ctx.restore();
   }
 
@@ -528,14 +868,19 @@ export function init() {
 
   function drawTimeoutOnWalls() {
     const boardFaces = state.faces.filter(f => f.isBoard);
-    for (const face of boardFaces) {
+    const floor = state.faces.find(f => f.isFloor);
+    const timeoutFaces = floor ? [...boardFaces, floor] : boardFaces;
+    for (const face of timeoutFaces) {
       const rotation = hudRotation(face.reservedSide);
       const readableW = (rotation === 0 || rotation === 180) ? face.width : face.height;
       const titleSize = Math.min(92, readableW * 0.12);
       const panelW = readableW * 0.84;
       const panelH = titleSize * 1.65;
       ctx.save();
-      ctx.translate(face.originX + face.width / 2, face.originY + face.height / 2);
+      const centerY = face.isFloor
+        ? face.originY + face.height * 0.28
+        : face.originY + face.height / 2;
+      ctx.translate(face.originX + face.width / 2, centerY);
       ctx.rotate(rotation * Math.PI / 180);
       ctx.fillStyle = 'rgba(4,6,12,0.90)';
       ctx.strokeStyle = '#ff1744';
@@ -552,6 +897,87 @@ export function init() {
     }
   }
 
+  function drawPausedOverlay() {
+    const floor = state.faces.find(f => f.isFloor);
+    const fx = floor ? floor.originX + floor.width / 2 : canvas.width / 2;
+    const fy = floor ? floor.originY + floor.height / 2 : canvas.height / 2;
+    ctx.fillStyle = 'rgba(2,4,10,0.70)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    drawText('⏸ PAUSED', fx, fy - 390, 74, '#ffb000', '900');
+    drawText('TIME CONTINUES · RESUME TO RETURN', fx, fy - 300, 24, '#d9c18a', '700');
+    drawCenterButton(fx, fy, 'resume');
+  }
+
+  function drawTimeoutEnding() {
+    const start = state.endingStartedAt ?? nowMs();
+    const elapsedMsValue = Math.max(0, nowMs() - start);
+    const endingDurationMs = animationDurationMs(state, 'timeoutEnding', WIN_ENDING_DURATION_MS);
+    const floor = state.faces.find(f => f.isFloor);
+    const fx = floor ? floor.originX + floor.width / 2 : canvas.width / 2;
+    const fy = floor ? floor.originY + floor.height / 2 : canvas.height / 2;
+
+    const maskAlpha = endingMaskAlpha(elapsedMsValue, endingDurationMs);
+    if (maskAlpha > 0) {
+      ctx.fillStyle = `rgba(2,4,10,${maskAlpha})`;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    drawText('TIME OUT', fx, fy - 340, 120, '#ff1744', '900');
+    drawText('SESSION COMPLETE', fx, fy - 250, 28, '#ffd9de', '700');
+    if (elapsedMsValue < ENDING_RESULTS_START_S * 1000) return;
+
+    const wall = state.faces.find(f => f.name === 'Wall Left');
+    if (!wall) return;
+    const x = wall.originX + wall.width / 2;
+    const y = wall.originY + wall.height / 2;
+    const rotation = hudRotation(wall.reservedSide);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rotation * Math.PI / 180);
+    ctx.fillStyle = 'rgba(7,13,22,0.96)';
+    ctx.strokeStyle = '#ff1744';
+    ctx.lineWidth = 4;
+    ctx.fillRect(-RESULT_PANEL_W / 2, -RESULT_PANEL_H / 2, RESULT_PANEL_W, RESULT_PANEL_H);
+    ctx.strokeRect(-RESULT_PANEL_W / 2, -RESULT_PANEL_H / 2, RESULT_PANEL_W, RESULT_PANEL_H);
+    drawText('TIME OUT', 0, -238, 38, '#ffd9de', '900');
+    drawText('THANK YOU FOR PLAYING', 0, -198, 22, '#ff1744', '700');
+    drawText(`TIME  ${fmtTime((state.gameEndMs ?? 0) - (state.gameStartMs ?? 0))}`, 0, -76, 27, '#ff1744', '700');
+    drawText(`MINES  ${String(state.flaggedCount).padStart(3, '0')}`, 0, 12, 27, '#ffd166', '700');
+    drawText(`SAFE   ${state.revealedCount}/${state.cells.length - state.mineCount}`, 0, 100, 27, '#39ff14', '700');
+    ctx.restore();
+  }
+
+  function drawOperatorEnding() {
+    const floor = state.faces.find(f => f.isFloor);
+    const fx = floor ? floor.originX + floor.width / 2 : canvas.width / 2;
+    const fy = floor ? floor.originY + floor.height / 2 : canvas.height / 2;
+    const wall = state.faces.find(f => f.name === 'Wall Left');
+    const elapsed = state.gameStartMs != null && state.gameEndMs != null
+      ? Math.max(0, state.gameEndMs - state.gameStartMs) : 0;
+    const totalSafe = state.cells.length - state.mineCount;
+
+    ctx.fillStyle = 'rgba(2,4,10,0.82)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    drawText('GAME ENDED', fx, fy - 340, 112, '#4DA3FF', '900');
+    drawText('OPERATOR STOP', fx, fy - 250, 28, '#DFF5FA', '700');
+    if (!wall) return;
+
+    const rotation = hudRotation(wall.reservedSide);
+    ctx.save();
+    ctx.translate(wall.originX + wall.width / 2, wall.originY + wall.height / 2);
+    ctx.rotate(rotation * Math.PI / 180);
+    ctx.fillStyle = 'rgba(7,13,22,0.96)';
+    ctx.strokeStyle = '#4DA3FF';
+    ctx.lineWidth = 4;
+    ctx.fillRect(-260, -360, 520, 720);
+    ctx.strokeRect(-260, -360, 520, 720);
+    drawText('GAME ENDED', 0, -250, 38, '#DFF5FA', '900');
+    drawText('THANK YOU FOR PLAYING', 0, -200, 22, '#4DA3FF', '700');
+    drawText(`TIME  ${fmtTime(elapsed)}`, 0, -40, 27, '#4DA3FF', '700');
+    drawText(`MINES  ${String(state.flaggedCount).padStart(3, '0')}`, 0, 30, 27, '#FFD166', '700');
+    drawText(`SAFE   ${state.revealedCount}/${totalSafe}`, 0, 100, 27, '#39FF14', '700');
+    ctx.restore();
+  }
+
   function drawFloorOverlay() {
     if (!state) return;
     const floor = state.faces.find(f => f.isFloor);
@@ -561,6 +987,9 @@ export function init() {
     const cyS = floor.originY + floor.height / 2;
 
     if (state.phase === 'idle') {
+      return;
+    }
+    if (state.phase === 'ready') {
       drawCenterButton(cxS, cyS, 'play');
       return;
     }
@@ -578,15 +1007,30 @@ export function init() {
       drawText('GET READY',cxS,cyS+145,44,color,'800');
       return;
     }
+    if (state.phase === 'paused') return;
 
     if (state.phase === 'gameOver') {
-      if (state.won) { drawCenterButton(cxS, cyS, 'restart'); return; }
-      if (animStart) {
-        const elapsed = performance.now() - animStart;
-        const waveDoneMs = RED_WAVE_DURATION_MS + RESTART_DELAY_AFTER_WAVE_MS;
-        if (elapsed < waveDoneMs) return;
+      if (state.won) {
+        if (state.endActionAt != null && nowMs() >= state.endActionAt) {
+          drawCenterButton(cxS, cyS, 'return');
+        }
+        return;
       }
-      drawCenterButton(cxS, cyS, 'restart');
+      if (state.endStage === 'timeout-wave') {
+        if (state.endActionAt == null || nowMs() < state.endActionAt) return;
+        drawCenterButton(cxS, cyS, 'continueEnd');
+        return;
+      }
+      if (state.endStage === 'timeout-ending') {
+        if (state.endActionAt != null && nowMs() >= state.endActionAt) {
+          drawCenterButton(cxS, cyS, 'return');
+        }
+        return;
+      }
+      if (state.endReason === 'operator') {
+        drawCenterButton(cxS, cyS, 'return');
+        return;
+      }
       return;
     }
 
@@ -596,7 +1040,7 @@ export function init() {
     const flagX = cxS - FLOOR_BTN_V - gap / 2, flagY = cyS - FLOOR_BTN_V / 2;
     const revX  = cxS + gap / 2,               revY  = cyS - FLOOR_BTN_V / 2;
 
-    const now = Date.now();
+    const now = nowMs();
     const flagOn = floorPulse?.mode === 'flag'   && now < floorPulse.until;
     const revOn  = floorPulse?.mode === 'reveal' && now < floorPulse.until;
 
@@ -612,8 +1056,62 @@ export function init() {
     drawText('⛏',  revX  + FLOOR_BTN_V/2, revY  + FLOOR_BTN_V/2, FLOOR_BTN_V * 0.65, '#fff');
   }
 
+  function drawWinEnding() {
+    const elapsedMsValue = Math.max(0, nowMs() - (state.gameEndMs ?? nowMs()));
+    const endingDurationMs = animationDurationMs(state, 'winEnding', WIN_ENDING_DURATION_MS);
+    const elapsed = elapsedMsValue / 1000;
+    const floor = state.faces.find(f => f.isFloor);
+    const fx = floor ? floor.originX + floor.width / 2 : canvas.width / 2;
+    const fy = floor ? floor.originY + floor.height / 2 : canvas.height / 2;
+    const last = state.lastRevealCellId != null ? state.cells[state.lastRevealCellId] : null;
+    const sourceFace = last ? state.faces.find(f => f.name === last.faceName) : null;
+    const sx = last && sourceFace ? sourceFace.originX + (last.col + 0.5) * 64 : fx;
+    const sy = last && sourceFace ? sourceFace.originY + (last.row + 0.5) * 64 : fy;
+
+    if (elapsed < 2) {
+      const p = elapsed / 2;
+      ctx.strokeStyle = '#ffd166';
+      ctx.globalAlpha = 1 - p;
+      ctx.lineWidth = 9;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 34 + p * Math.max(canvas.width, canvas.height), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    const maskAlpha = endingMaskAlpha(elapsedMsValue, endingDurationMs);
+    if (maskAlpha > 0) {
+      ctx.fillStyle = `rgba(2,4,10,${maskAlpha})`;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    drawText('YOU WIN', fx, fy - 340, 120, '#ffd166', '900');
+    drawText('ALL SAFE CELLS REVEALED', fx, fy - 250, 28, '#fff2c1', '700');
+
+    if (elapsedMsValue >= ENDING_RESULTS_START_S * 1000) {
+      const wall = state.faces.find(f => f.name === 'Wall Left');
+      if (!wall) return;
+      const x = wall.originX + wall.width / 2;
+      const y = wall.originY + wall.height / 2;
+      const rotation = hudRotation(wall.reservedSide);
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rotation * Math.PI / 180);
+      ctx.fillStyle = 'rgba(7,13,22,0.96)';
+      ctx.strokeStyle = '#00ffe5';
+      ctx.lineWidth = 4;
+      ctx.fillRect(-RESULT_PANEL_W / 2, -RESULT_PANEL_H / 2, RESULT_PANEL_W, RESULT_PANEL_H);
+      ctx.strokeRect(-RESULT_PANEL_W / 2, -RESULT_PANEL_H / 2, RESULT_PANEL_W, RESULT_PANEL_H);
+      drawText('THANK YOU', 0, -238, 38, '#e8f9fc', '900');
+      drawText('FOR PLAYING', 0, -198, 28, '#00ffe5', '700');
+      drawText(`TIME  ${fmtTime((state.gameEndMs ?? 0) - (state.gameStartMs ?? 0))}`, 0, -76, 27, '#00ffe5', '700');
+      drawText(`MINES  ${String(state.flaggedCount).padStart(3, '0')}`, 0, 12, 27, '#ffd166', '700');
+      drawText(`SAFE   ${state.revealedCount}/${state.cells.length - state.mineCount}`, 0, 100, 27, '#39ff14', '700');
+      ctx.restore();
+    }
+  }
+
   function drawCenterButton(cxS, cyS, kind) {
-    // kind: 'play' | 'playReady' | 'continue' | 'restart'
+    // kind: 'play' | 'playReady' | 'continue' | 'continueEnd' | 'resume' | 'return'
     // 物理 3×3 board cells = 75×75 cm = 192 venue px (1 大格 = 25cm = 64px).
     // 現在直接用 venue px 畫,browser CSS 下次 downscale 還是 75×75 cm
     const BTN = (state.restartBtnBoardCells ?? 3) * 64;
@@ -625,14 +1123,21 @@ export function init() {
       color = flashOn ? '#5dd97c' : '#3a9555';
       glow  = '#5dd97c';
       glyph = '▶'; label = 'PLAY';
-    } else if (kind === 'continue') {
+    } else if (kind === 'continue' || kind === 'resume') {
       color = flashOn ? '#00ffe5' : '#00a896';
       glow = '#00ffe5';
+      glyph = kind === 'resume' ? '▶' : '›';
+      label = kind === 'resume' ? 'RESUME' : 'CONTINUE';
+    } else if (kind === 'continueEnd') {
+      color = flashOn ? '#4DA3FF' : '#2469C7';
+      glow = '#66B5FF';
       glyph = '›'; label = 'CONTINUE';
     } else {
-      color = state.won ? '#5dd97c' : (flashOn ? '#ff5050' : '#cc3030');
-      glow  = state.won ? '#5dd97c' : '#ff5050';
-      glyph = '↻'; label = '重新';
+      color = state.won ? '#5dd97c'
+        : state.endReason === 'operator' ? '#4DA3FF' : '#00ffe5';
+      glow  = state.won ? '#5dd97c'
+        : state.endReason === 'operator' ? '#66B5FF' : '#00ffe5';
+      glyph = '⏏'; label = 'RETURN';
     }
 
     ctx.save();
@@ -652,6 +1157,10 @@ export function init() {
       // 0.42 + half of 0.08 = 0.46 of BTN from centre, inside the 0.5 edge.
       drawText(`STEP ${(state.tutorialStep ?? 0)+1}/${state.tutorialTotal ?? 4}`,
                cxS, cyS + BTN*.42, BTN*.08, '#bffcf5', '700');
+    } else if (kind === 'continueEnd') {
+      drawText('進入結尾動畫', cxS, cyS + BTN*.42, BTN*.08, '#B9DCFF', '700');
+    } else if (kind === 'resume') {
+      drawText('繼續遊戲', cxS, cyS + BTN*.42, BTN*.08, '#d9f9df', '700');
     }
   }
 
@@ -669,8 +1178,19 @@ export function init() {
     els.flags.textContent = String(state.flaggedCount);
     const totalBoard = state.cells.length;
     els.revealed.textContent = `${state.revealedCount} / ${totalBoard - state.mineCount}`;
+    const preTutorial = state.phase === 'idle' || state.phase === 'armed' ||
+      state.phase === 'intro' || state.phase === 'ready';
+    for (const el of [els.mines, els.flags, els.revealed]) {
+      if (el?.parentElement) el.parentElement.style.display = preTutorial ? 'none' : '';
+    }
     if (state.phase === 'idle') {
-      els.lockStat.innerHTML = '<b style="color:#5dd97c">▶ 踩地板中央 PLAY</b>';
+      els.lockStat.innerHTML = '<b style="color:#8fa8b8">等待後台開始遊戲</b>';
+    } else if (state.phase === 'armed') {
+      els.lockStat.innerHTML = '<b style="color:#ff2d8f">等待玩家按 Wall Left 地雷按鈕</b>';
+    } else if (state.phase === 'intro') {
+      els.lockStat.innerHTML = '<b style="color:#00ffe5">前導動畫播放中 · 場域觸控鎖定</b>';
+    } else if (state.phase === 'ready') {
+      els.lockStat.innerHTML = '<b style="color:#5dd97c">前導完成 · 踩地板中央 PLAY</b>';
     } else if (state.phase === 'tutorial') {
       els.lockStat.innerHTML = `<b style="color:#00ffe5">TUTORIAL ${state.tutorialStep + 1}/${state.tutorialTotal} · CONTINUE</b>`;
     } else if (state.phase === 'tutorialReady') {
@@ -716,13 +1236,43 @@ export function init() {
     onCellUpdate: () => { updateHeader(); },
     onModeFeedback: ({ mode, accepted }) => {
       if (!accepted) return;
-      floorPulse = { mode, until: Date.now() + 300 };
+      floorPulse = { mode, until: nowMs() + 300 };
     },
     onTutorial: ({ snapshot }) => {
       state = snapshot;
       animStart = 0;
       maxWaveDist = 0;
       updateHeader();
+    },
+    onIntro: ({ snapshot }) => {
+      state = snapshot;
+      animStart = 0;
+      maxWaveDist = 0;
+      updateHeader();
+    },
+    onArmed: ({ snapshot }) => {
+      state = snapshot;
+      animStart = 0;
+      maxWaveDist = 0;
+      updateHeader();
+      resize();
+    },
+    onEndingStart: ({ snapshot }) => {
+      state = snapshot;
+      animStart = 0;
+      maxWaveDist = 0;
+      updateHeader();
+    },
+    onFreeze: ({ redWave, redWaveStartedAt, cells }) => {
+      if (!state) return;
+      for (const c of cells || []) state.cells[c.id] = c;
+      state.redWave = redWave || null;
+      state.redWaveStartedAt = redWaveStartedAt ?? nowMs();
+    },
+    onUnfreeze: () => {
+      if (!state) return;
+      state.redWave = null;
+      state.redWaveStartedAt = null;
     },
     onGameOver: ({ snapshot }) => onGameOver(snapshot),
     onReset: ({ snapshot }) => {
@@ -737,7 +1287,16 @@ export function init() {
       maxWaveDist = 0;
       updateHeader();
     },
+    onPause: ({ snapshot }) => {
+      state = snapshot;
+      updateHeader();
+    },
+    onResume: ({ snapshot }) => {
+      state = snapshot;
+      updateHeader();
+    },
   });
+  nowMs = () => client.now();
   setInterval(() => {
     ws = client._ws;
     if (PROJECTOR_MODE || !els.connStat) return;

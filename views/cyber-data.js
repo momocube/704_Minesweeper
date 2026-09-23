@@ -76,10 +76,10 @@ function fmtTime(ms) {
 }
 
 const PALETTES = {
-  "cyan-magenta": { primary:"#00FFE5", secondary:"#FF2D8F", accent:"#39FF14", danger:"#FF1744", warn:"#FF6B00", bg0:"#04060A", bg1:"#070B12", label:"CYAN × MAGENTA" },
-  "amber-red":    { primary:"#FFB000", secondary:"#FF3D00", accent:"#FFEB00", danger:"#FF1744", warn:"#FF6B00", bg0:"#08050A", bg1:"#100A06", label:"AMBER × RED (BR2049)" },
-  "tron-blue":    { primary:"#00CFFF", secondary:"#7FF4FF", accent:"#FFFFFF", danger:"#FF3D7F", warn:"#FFB000", bg0:"#020410", bg1:"#040820", label:"TRON BLUE" },
-  "synthwave":    { primary:"#FF2D8F", secondary:"#9B5CFF", accent:"#00FFE5", danger:"#FF1744", warn:"#FFB000", bg0:"#0A0418", bg1:"#150828", label:"SYNTHWAVE" },
+  "cyan-magenta": { primary:"#00FFE5", secondary:"#FF2D8F", accent:"#39FF14", danger:"#FF1744", warn:"#FF6B00", bg0:"#04060A", bg1:"#070B12", idleBg:"#121817", idleGrid:["#00FFE5","#FF2D8F","#39FF14","#FF6B00"], label:"CYAN × MAGENTA" },
+  "amber-red":    { primary:"#FFB000", secondary:"#FF3D00", accent:"#FFEB00", danger:"#FF1744", warn:"#FF6B00", bg0:"#08050A", bg1:"#100A06", idleBg:"#121817", idleGrid:["#FFB000","#FFEB00","#FFC400","#FFE600"], label:"AMBER × RED (BR2049)" },
+  "tron-blue":    { primary:"#00CFFF", secondary:"#7FF4FF", accent:"#FFFFFF", danger:"#FF3D7F", warn:"#FFB000", bg0:"#020410", bg1:"#040820", idleBg:"#121817", idleGrid:["#00CFFF","#7FF4FF","#00A3FF","#B4FFFF"], label:"TRON BLUE" },
+  "synthwave":    { primary:"#FF2D8F", secondary:"#9B5CFF", accent:"#00FFE5", danger:"#FF1744", warn:"#FFB000", bg0:"#0A0418", bg1:"#150828", idleBg:"#121817", idleGrid:["#FF2D8F","#9B5CFF","#00FFE5","#FF00A8"], label:"SYNTHWAVE" },
 };
 
 const NUMBER_COLORS = (p) => [null, p.primary, p.accent, "#FFEB00", p.warn, p.secondary, p.danger, "#FFFFFF", "#FF00A8"];
