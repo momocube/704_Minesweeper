@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>704 音訊控制台</title>
+<link rel="icon" href="data:,">
+<style>
+:root{color-scheme:light;--paper:#eef3f7;--ink:#20384a;--blue:#235cb0;--teal:#146859;--line:#b7c9d8;--muted:#50687b;--white:#fff}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.65 "Microsoft JhengHei","PingFang TC",sans-serif}main{max-width:1120px;margin:auto;padding:40px 28px 60px}header{display:flex;gap:28px;align-items:baseline;justify-content:space-between;border-bottom:3px solid var(--ink);padding-bottom:20px}h1{font-size:32px;letter-spacing:.01em;line-height:1.3;margin:0}h1 span{font-size:18px;font-weight:400;display:block;margin-top:8px}h2{font-size:20px;margin:0 0 20px}p{max-width:70ch;margin:8px 0;color:var(--muted)}header p{max-width:35ch;font-size:14px}button{font:inherit;cursor:pointer;border:1px solid var(--blue);background:var(--white);color:var(--blue);border-radius:6px;padding:10px 18px}button:hover:enabled{background:#e2ecfa}button:disabled{cursor:not-allowed;opacity:.5}button:focus-visible,input:focus-visible{outline:3px solid #925209;outline-offset:4px}.primary{color:white;background:var(--blue);border-color:var(--blue);font-weight:700}.primary:hover:enabled{background:#1b4789}.transport{padding:26px 0;display:flex;align-items:center;gap:14px;flex-wrap:wrap}.badge{color:var(--muted);font-weight:700;display:inline-flex;gap:9px;align-items:center}.badge:before{content:"";display:block;width:9px;height:9px;border-radius:50%;background:currentColor}.badge[data-on=true]{color:var(--teal)}#notice{background:#dfeaf4;border-left:4px solid var(--blue);padding:12px 18px;max-width:none;margin:0 0 26px;color:var(--ink)}#notice[data-error=true]{background:#fff0e6;border-color:#a34c15}.desk{display:grid;grid-template-columns:1.2fr 1fr;gap:32px}.mixer{background:var(--white);border:1px solid var(--line);padding:26px}.channel{display:grid;grid-template-columns:100px 1fr 50px;gap:14px;align-items:center;padding:20px 0;border-top:1px solid #dde5ec}.channel output{text-align:right;font-variant-numeric:tabular-nums}.channel label{font-weight:700}input[type=range]{width:100%;accent-color:var(--blue);min-height:28px;cursor:pointer}.facts{display:grid;grid-template-columns:1fr 1fr;margin:0}.facts div{border-top:1px solid var(--line);padding:15px 10px 15px 0}.facts dt{font-size:14px;color:var(--muted)}.facts dd{margin:5px 0 0;font-weight:700;overflow-wrap:anywhere}.library{margin-top:26px;border-top:1px solid var(--line);padding-top:20px}.library h2{margin-bottom:8px}#sound-list{display:flex;gap:10px;flex-wrap:wrap}.events{margin-top:32px}.events-head{display:flex;align-items:center;justify-content:space-between;gap:16px}.events h2{margin:0}.events-head button{padding:5px 12px;font-size:14px}.table-wrap{max-height:320px;overflow:auto;border:1px solid var(--line);background:var(--white);margin-top:14px}table{width:100%;border-collapse:collapse;text-align:left;font-size:14px}th{position:sticky;top:0;background:#dfe9f1;color:var(--ink)}td,th{padding:10px 14px;border-bottom:1px solid #dde5ec}td:first-child{white-space:nowrap;font-variant-numeric:tabular-nums}td:nth-child(2){overflow-wrap:anywhere}footer{margin-top:28px;border-top:1px solid var(--line);padding-top:14px;font-size:13px;color:var(--muted)}code{font:inherit;font-weight:700;overflow-wrap:anywhere}@media(max-width:760px){main{padding:24px 18px}header{display:block}header p{margin-top:16px}.desk{grid-template-columns:1fr;gap:22px}h1{font-size:28px}.channel{grid-template-columns:86px 1fr 46px;gap:8px}.mixer{padding:20px}.transport button{flex:1}td,th{padding:9px 10px}}
+</style>
+</head>
+<body>
+<main>
+<header><h1>704<span>音訊控制台</span></h1><p>獨立接收遊戲事件。<br>不操作遊戲，也不更動投影畫面。</p></header>
+<section class="transport" aria-label="播放控制">
+<button id="enable" class="primary">啟用聲音</button>
+<button id="stop" disabled>停止並停用</button>
+<button id="test-victory" data-sound="victory-preview" disabled>測試勝利音效</button>
+<span id="output-state" class="badge" data-on="false" role="status">未啟用</span>
+</section>
+<p id="notice" role="status">已建立 15 個音源的事件對應。尚未放入音檔也能觀察事件與音效預覽；啟用後缺檔會顯示錯誤。</p>
+<div class="desk">
+<section class="mixer" aria-labelledby="mixer-title">
+<h2 id="mixer-title">音量控制</h2>
+<div class="channel"><label for="master">總音量</label><input id="master" type="range" min="0" max="100" value="70"><output id="master-value" for="master">70%</output></div>
+<div class="channel"><label for="bgm">背景音樂</label><input id="bgm" type="range" min="0" max="100" value="60"><output id="bgm-value" for="bgm">60%</output></div>
+<div class="channel"><label for="sfx">事件音效</label><input id="sfx" type="range" min="0" max="100" value="80"><output id="sfx-value" for="sfx">80%</output></div>
+<p>音量只在本次開啟期間保留。重新開啟會回到設定檔的預設值。</p>
+</section>
+<section aria-labelledby="monitor-title">
+<h2 id="monitor-title">遊戲同步</h2>
+<dl class="facts">
+<div><dt>伺服器</dt><dd id="connection" class="badge" data-on="false">連線中</dd></div>
+<div><dt>目前階段</dt><dd id="phase">等待快照</dd></div>
+<div><dt>背景音樂</dt><dd id="music">無</dd></div>
+<div><dt>已載入音源</dt><dd id="loaded">0 / 0</dd></div>
+</dl>
+<div class="library"><h2>音源與播放位置</h2><p>已設定 <span id="mapping-count">0</span> 條事件音效規則。下方為第一版對應，供確認。</p><p>音檔放在 <code>views/audio/assets/</code>，檔名須完全一致（包含 <code>sfx_buttom.wav</code>）。放好後重新整理本頁，再啟用聲音。</p><p>試聽會停止目前聲音，不會操作遊戲；BGM 走背景音量，其他音效走音效音量。</p><button id="restore-music" data-sound="restore">返回遊戲配樂</button><p id="empty">尚未設定音源。</p><div id="sound-list"></div></div>
+</section>
+</div>
+<section class="events" aria-labelledby="events-title">
+<div class="events-head"><h2 id="events-title">最近收到的事件</h2><button id="clear-log">清除紀錄</button></div>
+<p>最新事件在最上方，保留最近 60 筆。尚未啟用聲音也能觀察事件。</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">時間</th><th scope="col">事件</th><th scope="col">內容</th></tr></thead><tbody id="event-log"></tbody></table></div>
+</section>
+<footer>現場只開一個音訊控制台。分頁互斥僅涵蓋同來源、同瀏覽器設定檔；跨瀏覽器或不同電腦需由操作員避免重複啟用。投播視窗不會自動載入本頁。</footer>
+</main>
+<script type="module" src="./audio/app.js"></script>
+</body>
+</html>
